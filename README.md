@@ -32,7 +32,25 @@ a generated-code check.
 
 ## Getting started
 
-**1. Install the Claude Code plugin** (the skills that author the model):
+You need two things, in this order: the **CLI** (the engine that lints and
+renders) and the **Claude Code plugin** (the skills that drive it by
+conversation) — the skills shell out to the binary, so install it first.
+
+**1. Install the CLI:**
+
+```sh
+brew install stacklok/tap/modelith
+```
+
+Or download a prebuilt binary from the
+[Releases page](https://github.com/stacklok/modelith/releases), or build from
+source:
+
+```sh
+go install github.com/stacklok/modelith/cmd/modelith@latest
+```
+
+**2. Install the Claude Code plugin** (the skills that author the model):
 
 > **Not yet in the marketplace.** The commands below will work once the plugin is
 > published to `anthropics/claude-plugins-community` (roadmap item). Until then,
@@ -49,20 +67,6 @@ Or with the [skills CLI](https://skills.sh) (also works with Cursor, Windsurf, a
 
 ```sh
 npx skills add stacklok/modelith
-```
-
-**2. Install the CLI** the skills (and CI) call:
-
-```sh
-brew install stacklok/tap/modelith
-```
-
-Or download a prebuilt binary from the
-[Releases page](https://github.com/stacklok/modelith/releases), or build from
-source:
-
-```sh
-go install github.com/stacklok/modelith/cmd/modelith@latest
 ```
 
 **3. Author by conversation.** In Claude Code, invoke `/modelith:domain-model-author`

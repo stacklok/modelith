@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 title: Getting Started
-description: Install the Claude Code plugin and build your first domain model by talking to an agent.
+description: Install the CLI and the Claude Code plugin, then build your first domain model by talking to an agent.
 ---
 
 # Getting Started
@@ -11,7 +11,25 @@ concepts, relationships, and scenarios in plain language to an AI agent and have
 it construct and update the YAML. The YAML is the *output* of that conversation,
 not the starting point. This page gets you set up and into that loop.
 
-## Install the plugin
+## Install
+
+You need two things, in this order: the **CLI** (the engine that lints and
+renders the YAML) and the **Claude Code plugin** (the skills that drive it by
+conversation). The skills shell out to the `modelith` binary, so install it
+first — otherwise your first skill invocation fails on a missing binary
+instead of doing anything useful.
+
+### 1. Install the CLI
+
+```sh
+brew install stacklok/tap/modelith
+```
+
+Or download a prebuilt binary, or build from source with `go install` — see
+the full [CLI installation](./07-cli.md#installation) instructions for every
+option.
+
+### 2. Install the plugin
 
 The skills ship as a **Claude Code plugin**. The plugin files live in
 [`plugin/`](https://github.com/stacklok/modelith/tree/main/plugin), next to
@@ -46,9 +64,6 @@ Cursor, Windsurf, and other agents):
 ```sh
 npx skills add stacklok/modelith
 ```
-
-The skills shell out to the `modelith` binary, so install that too — see the
-[CLI installation](./07-cli.md#installation) instructions.
 
 <details>
 <summary>If the install looks like it did nothing</summary>
