@@ -54,10 +54,16 @@ npx skills add stacklok/modelith
 **2. Install the CLI** the skills (and CI) call:
 
 ```sh
-go install github.com/stacklok/modelith/cmd/modelith@latest
+brew install stacklok/tap/modelith
 ```
 
-Or download a release binary from the [Releases page](https://github.com/stacklok/modelith/releases).
+Or download a prebuilt binary from the
+[Releases page](https://github.com/stacklok/modelith/releases), or build from
+source:
+
+```sh
+go install github.com/stacklok/modelith/cmd/modelith@latest
+```
 
 **3. Author by conversation.** In Claude Code, invoke `/modelith:domain-model-author`
 and describe your domain — the agent asks the questions, drafts the YAML, lints

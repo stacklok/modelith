@@ -13,15 +13,19 @@ command, flag, and the one-time install.
 
 ## Installation
 
-Install the latest release with `go install`:
+Install the latest release with Homebrew:
+
+```sh
+brew install stacklok/tap/modelith
+```
+
+Or download a prebuilt binary from the
+[Releases page](https://github.com/stacklok/modelith/releases), build from
+source with `go install`, or build from a checkout with `task build`:
 
 ```sh
 go install github.com/stacklok/modelith/cmd/modelith@latest
 ```
-
-Or download a prebuilt binary from the
-[Releases page](https://github.com/stacklok/modelith/releases), or build from a
-checkout with `task build`.
 
 ## `modelith lint`
 

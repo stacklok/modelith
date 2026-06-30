@@ -100,6 +100,18 @@ Claude Code plugin with `--plugin-dir` live in
 - **Stay on schema `v1`** while pre-release — there's no external `*.modelith.yaml`
   corpus to preserve, so the format evolves in place rather than bumping to v2.
 
+## Cutting a release
+
+Push a `vX.Y.Z` tag on `main` — `release.yml` builds, signs, generates SBOMs,
+publishes the GitHub Release, and pushes the Homebrew formula to
+`stacklok/homebrew-tap`. After it succeeds:
+
+- **Bump `action.yml`'s `version` input default to the new tag and commit.**
+  `action.yml` downloads a specific pinned release rather than building from
+  source (see [`docs/08-github-action.md`](./docs/08-github-action.md)) — skip
+  this step and the action keeps installing an old release indefinitely, with
+  no error to flag it.
+
 ## Design history
 
 [`audits/`](./audits/) holds dated audit + design-decision records (rationale for

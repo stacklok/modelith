@@ -33,7 +33,7 @@ jobs:
 | `files` | — (required) | YAML files or globs, space-, comma-, or newline-separated. |
 | `completeness` | `warn` | Treat completeness gaps as `warn` or `error`. |
 | `check-rendered` | `true` | Verify the committed `*.md` matches the YAML. |
-| `go-version` | `stable` | Go version used to build `modelith`. |
+| `version` | (pinned to a specific release) | `modelith` release to install, e.g. `v0.4.0`. |
 
 Multiple files / globs:
 
@@ -46,10 +46,11 @@ with:
 
 ## How it works
 
-The action builds `modelith` from its own pinned source on the runner — it does **not**
-download a prebuilt release binary. Building from source means you always get the
-exact version pinned in the action reference and there are no binary download
-dependencies.
+The action downloads the prebuilt `modelith` release binary for the runner's OS/arch
+and verifies it against the release's published checksums before running it. The
+`version` input defaults to a specific release pinned in `action.yml` — combined with
+pinning your `uses:` reference to a commit SHA, this keeps CI runs reproducible: a
+given action commit always installs the same `modelith` version.
 
 ## Regenerating the Markdown
 
