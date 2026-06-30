@@ -103,6 +103,6 @@ Claude Code plugin with `--plugin-dir` live in
 ## Design history
 
 [`audits/`](./audits/) holds dated audit + design-decision records (rationale for
-the choices above). The 2026-06-04 foundational audit is fully actioned; the only
-open follow-up is OPS-9 (release-branch guard), tracked as
+the choices above) and the process for running new ones. The only known open
+follow-up is a release-branch guard for `release.yml`, tracked as
 [issue #1](https://github.com/stacklok/modelith/issues/1).
