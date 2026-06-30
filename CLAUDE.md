@@ -111,6 +111,18 @@ publishes the GitHub Release, and pushes the Homebrew formula to
   source (see [`docs/08-github-action.md`](./docs/08-github-action.md)) — skip
   this step and the action keeps installing an old release indefinitely, with
   no error to flag it.
+- **Bump `plugin/.claude-plugin/plugin.json`'s `version` to match, if the
+  plugin/skills changed.** The plugin ships next to the binary it drives so
+  the two stay in lockstep (see "Repository layout" above) — this doesn't
+  enforce itself.
+- **If the plugin is listed on the Claude plugin marketplace**
+  (`anthropics/claude-plugins-community`), check whether a meaningful
+  `plugin/` change needs to be re-submitted there too. Marketplace entries
+  pin a specific commit SHA (confirmed by inspecting that repo's
+  `marketplace.json`) — listing it once does not mean it tracks `main`
+  afterward. The exact re-submission mechanism wasn't determined as of this
+  writing (submission is via <https://clau.de/plugin-directory-submission>,
+  not a PR — direct PRs against that repo are auto-closed).
 
 ## Design history
 
