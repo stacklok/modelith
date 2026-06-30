@@ -1,0 +1,458 @@
+# yaml-language-server: $schema=https://modelith.sh/schema/domain-model/v1.json
+kind: DomainModel
+version: v1
+title: Parking Garage
+description: >-
+  Tracks the state of a single parking garage: its spots, the cars that occupy
+  them, and the two ways a car enters — a monthly parker's keycard or a
+  temporary visitor's pay-on-exit ticket.
+
+glossary:
+  Operator: >-
+    Garage staff or management who open `Account`s, issue `Keycard`s, register
+    `Car`s, designate reserved `Spot`s, and otherwise administer the `Garage`.
+    A human role, not modeled as an entity.
+  Driver: >-
+    A person who enters and exits using a monthly `Account`'s `Keycard`. The
+    human behind a `Car`; not modeled as an entity.
+  Visitor: >-
+    A person with no `Account` who enters by taking a `Ticket` and pays at a
+    `Kiosk` before exit. Not modeled as an entity.
+
+enums:
+  SpotKind:
+    description: Whether a `Spot` is open to all entrants or reserved for one `Account`.
+    values:
+      - name: general
+        definition: Any entrant — monthly or temporary — may occupy this `Spot`.
+      - name: reserved
+        definition: >-
+          Assigned to one `Account`; only that account's `Car`s may occupy it.
+  AccountStatus:
+    description: The billing standing of an `Account`.
+    values:
+      - name: active
+        definition: In good standing; its `Keycard`s open the gate.
+      - name: suspended
+        definition: >-
+          Billing lapsed or administratively held; its `Keycard`s are refused
+          at the gate until reinstated.
+
+entities:
+  Garage:
+    definition: >-
+      A single physical parking structure whose `Spot`s the system tracks. It is
+      the top-level container: every `Spot` and `Kiosk` belongs to exactly one
+      `Garage`. Multi-site operation (several structures under one operator) is
+      intentionally out of scope for now.
+    relationships:
+      - entity: Spot
+        cardinality: 1:n
+        ownership: owned
+      - entity: Kiosk
+        cardinality: 1:n
+        ownership: owned
+    attributes:
+      - name: name
+        type: string
+        description: Human-facing name of the structure.
+      - name: address
+        type: string
+      - name: availableSpots
+        type: integer
+        derived: true
+        derivation: >-
+          The number of `Spot`s in this `Garage` that have no active `Visit`.
+    invariants:
+      - id: garage-capacity
+        statement: >-
+          The number of active `Visit`s in a `Garage` never exceeds its number
+          of `Spot`s.
+
+  Spot:
+    definition: >-
+      A single parking space within a `Garage`. A `Spot` is either general (any
+      entrant may use it) or reserved — assigned to one monthly `Account`, whose
+      registered `Car`s alone may park there. At any moment a `Spot` is occupied
+      by at most one active `Visit`.
+    relationships:
+      - entity: Account
+        cardinality: n:1
+        ownership: referenced
+        note: >-
+          Set only for a reserved `Spot`: the monthly `Account` it is assigned
+          to. A general `Spot` has no assignment.
+    attributes:
+      - name: label
+        type: string
+        description: Where the `Spot` is, e.g. "A-114".
+      - name: kind
+        type: SpotKind
+        derived: true
+        derivation: >-
+          `reserved` if an `Account` is assigned to this `Spot`, otherwise
+          `general`.
+      - name: occupied
+        type: boolean
+        derived: true
+        derivation: True if this `Spot` currently has an active `Visit`.
+    actions:
+      - name: designate-reserved
+        actor: Operator
+        preserves: [account-spots-within-keycards]
+        description: Assign this `Spot` to an `Account`, making it reserved.
+      - name: release-reservation
+        actor: Operator
+        description: >-
+          Unassign the `Account`, returning the `Spot` to general use.
+    invariants:
+      - id: spot-single-occupant
+        statement: A `Spot` holds at most one active `Visit` at any moment.
+      - id: reserved-spot-restricted
+        statement: >-
+          A reserved `Spot` may be occupied only by a `Car` registered to the
+          `Account` it is assigned to.
+
+  Account:
+    definition: >-
+      The billing entity for monthly parking. An `Account` owns one or more
+      `Keycard`s (gate access for its drivers) and registers one or more `Car`s.
+      An `Account` may additionally pay extra for one or more reserved `Spot`s —
+      any of the account's `Car`s may use any of its reserved `Spot`s — but an
+      `Account` need have no reserved `Spot` at all: its `Keycard` holders still
+      have gate access and park in general `Spot`s like any visitor. Temporary
+      visitors have no `Account` — they enter with a `Ticket`.
+    relationships:
+      - entity: Keycard
+        cardinality: 1:n
+        ownership: owned
+        note: >-
+          One per driver who needs gate access; independent of how many reserved
+          `Spot`s, if any, the `Account` holds.
+      - entity: Car
+        cardinality: 1:n
+        ownership: owned
+    attributes:
+      - name: holderName
+        type: string
+        description: The customer the account bills to.
+      - name: billingEmail
+        type: string
+      - name: status
+        type: AccountStatus
+      - name: reservedSpotCount
+        type: integer
+        derived: true
+        derivation: The number of `Spot`s assigned to this `Account`.
+    actions:
+      - name: open-account
+        actor: Operator
+      - name: issue-keycard
+        actor: Operator
+        preserves: [keycard-one-account, account-keycard-required]
+      - name: register-car
+        actor: Operator
+        preserves: [car-one-account]
+      - name: suspend
+        actor: Operator
+        description: Set `status` to suspended; gate access is refused until reinstated.
+      - name: close-account
+        actor: Operator
+    invariants:
+      - id: account-keycard-required
+        statement: An `Account` has at least one `Keycard`.
+      - id: account-spots-within-keycards
+        statement: >-
+          An `Account` holds no more reserved `Spot`s than it has `Keycard`s —
+          every reserved `Spot` needs a `Keycard` to use it. An `Account` may
+          hold zero reserved `Spot`s.
+
+  Keycard:
+    definition: >-
+      A physical access credential issued to an `Account` that opens the gate
+      for monthly parkers. A `Keycard` belongs to exactly one `Account` and is
+      reused across many `Visit`s. It identifies the account, not a specific
+      `Car`, and is not bound to any particular `Spot` — it simply grants gate
+      access for one of the account's drivers.
+    attributes:
+      - name: cardNumber
+        type: string
+        description: The credential's unique identifier, encoded on the card.
+      - name: enabled
+        type: boolean
+        description: False once deactivated; a disabled `Keycard` is refused at the gate.
+      - name: inUse
+        type: boolean
+        derived: true
+        derivation: >-
+          True while this `Keycard` has an active `Visit` — its car is in the
+          `Garage`. This is the state that enforces anti-passback.
+    actions:
+      - name: deactivate
+        actor: Operator
+        description: Set `enabled` to false, e.g. on a lost card.
+    invariants:
+      - id: keycard-one-account
+        statement: A `Keycard` belongs to exactly one `Account`.
+      - id: keycard-one-active-visit
+        statement: >-
+          A `Keycard` is associated with at most one active `Visit` at a time,
+          and may not start a new `Visit` while it already has an active one.
+
+  Car:
+    definition: >-
+      A vehicle registered to a monthly `Account`, together with its metadata
+      (plate, make, model, and so on). Only monthly parkers' vehicles are
+      tracked as a `Car`; a temporary visitor's vehicle is captured only as a
+      plate on their `Ticket`, never as a `Car`.
+    attributes:
+      - name: plate
+        type: string
+        description: License plate; how a `Car` is recognized at the gate.
+      - name: make
+        type: string
+      - name: model
+        type: string
+      - name: color
+        type: string
+    invariants:
+      - id: car-one-account
+        statement: A `Car` is registered to exactly one `Account`.
+
+  Ticket:
+    definition: >-
+      A temporary entry credential issued at the gate to a visitor with no
+      `Account`. It records the entry time and the captured plate, and is paid
+      at a `Kiosk` before exit. Each `Ticket` belongs to exactly one `Visit`.
+    relationships:
+      - entity: Kiosk
+        cardinality: n:1
+        ownership: referenced
+        note: The `Kiosk` where the `Ticket` is paid on exit; unset until paid.
+    attributes:
+      - name: plate
+        type: string
+        description: The plate captured at the gate; the only record of a visitor's car.
+      - name: issuedAt
+        type: timestamp
+      - name: amountDue
+        type: integer
+        description: Fee owed, in the smallest currency unit.
+        derived: true
+        derivation: >-
+          Computed at payment time from the parking duration (issue time to now)
+          and the `Garage`'s rate schedule.
+      - name: paidAt
+        type: timestamp
+        description: When the `Ticket` was paid; unset until then.
+      - name: paid
+        type: boolean
+        derived: true
+        derivation: True once `paidAt` is set.
+    actions:
+      - name: pay
+        actor: Visitor
+        preserves: [kiosk-same-garage]
+        description: Pay the fee at a `Kiosk`, setting `paidAt` and unlocking exit.
+    invariants:
+      - id: ticket-paid-before-exit
+        statement: >-
+          A `Ticket` must be paid at a `Kiosk` before its `Visit` may exit the
+          `Garage`.
+
+  Visit:
+    definition: >-
+      One car's stay in the `Garage`, from entry to exit, occupying a single
+      `Spot`. Every `Visit` is started by exactly one credential — a `Keycard`
+      (monthly) or a `Ticket` (temporary), never both. The `Visit` is the
+      central record tying together the `Spot`, the entrant, and the entry and
+      exit times.
+    relationships:
+      - entity: Spot
+        cardinality: n:1
+        ownership: referenced
+      - entity: Car
+        cardinality: n:1
+        ownership: referenced
+        note: >-
+          The registered `Car`, when the entrant is a monthly parker and the
+          vehicle is identified; absent for temporary visitors.
+      - entity: Keycard
+        cardinality: n:1
+        ownership: referenced
+        note: Present when entry was by `Keycard` (monthly).
+      - entity: Ticket
+        cardinality: 1:1
+        ownership: owned
+        note: >-
+          Present when entry was by `Ticket` (temporary); created together with
+          the `Visit`.
+    attributes:
+      - name: entryAt
+        type: timestamp
+        description: When the car entered and the `Visit` began.
+      - name: exitAt
+        type: timestamp
+        description: When the car left; unset while the `Visit` is active.
+      - name: active
+        type: boolean
+        derived: true
+        derivation: True while `exitAt` is unset — the car is still in the `Garage`.
+    actions:
+      - name: enter-with-keycard
+        actor: Driver
+        preserves:
+          - visit-one-credential
+          - spot-single-occupant
+          - reserved-spot-restricted
+          - keycard-one-active-visit
+          - garage-capacity
+        description: A monthly `Driver` swipes a `Keycard`; a `Visit` starts on a `Spot`.
+      - name: enter-with-ticket
+        actor: Visitor
+        preserves:
+          - visit-one-credential
+          - spot-single-occupant
+          - garage-capacity
+        description: >-
+          A `Visitor` takes a `Ticket` at the gate; a `Visit` starts on a general
+          `Spot`.
+      - name: exit-monthly
+        actor: Driver
+        preserves: [visit-exit-after-entry]
+        description: A `Driver` swipes out; `exitAt` is set and the `Spot` is freed.
+      - name: exit-temporary
+        actor: Visitor
+        preserves: [ticket-paid-before-exit, visit-exit-after-entry]
+        description: >-
+          A `Visitor` exits after paying; `exitAt` is set and the `Spot` is freed.
+    invariants:
+      - id: visit-one-credential
+        statement: >-
+          Every `Visit` is started by exactly one credential — a `Keycard` or a
+          `Ticket`, never both and never neither.
+      - id: visit-exit-after-entry
+        statement: A `Visit`'s exit time, once set, is at or after its entry time.
+
+  Kiosk:
+    definition: >-
+      A payment station within a `Garage` where temporary visitors pay their
+      `Ticket` before exiting. A `Kiosk` belongs to one `Garage` and processes
+      many `Ticket` payments. Monthly parkers using a `Keycard` do not interact
+      with a `Kiosk`.
+    attributes:
+      - name: label
+        type: string
+        description: Where the `Kiosk` stands, e.g. "Level 1 elevator lobby".
+    invariants:
+      - id: kiosk-same-garage
+        statement: >-
+          A `Ticket` may be paid only at a `Kiosk` in the same `Garage` as the
+          `Ticket`'s `Visit`.
+
+scenarios:
+  - name: Monthly parker uses a reserved spot
+    actors: [Account, Car, Keycard, Spot, Visit]
+    steps:
+      - >-
+        A customer holds an `Account` with a registered `Car` and an assigned
+        reserved `Spot`.
+      - >-
+        The customer swipes their `Keycard` at the gate; the system opens it and
+        starts a `Visit` on the assigned `Spot`, with no `Ticket`.
+      - >-
+        The `Visit` records the `Car` and the entry time; the reserved `Spot`
+        now holds one active `Visit`.
+      - >-
+        On return, the customer swipes the `Keycard` to exit; the `Visit`'s exit
+        time is set and the `Spot` is freed. No `Kiosk` payment occurs.
+    invariants_touched:
+      - visit-one-credential
+      - spot-single-occupant
+      - reserved-spot-restricted
+      - visit-exit-after-entry
+
+  - name: Monthly parker without a reserved spot uses a general spot
+    actors: [Account, Car, Keycard, Spot, Visit]
+    steps:
+      - >-
+        A customer holds an `Account` with a `Keycard` and a registered `Car`
+        but pays for no reserved `Spot`.
+      - >-
+        The customer swipes their `Keycard`; the gate opens and a `Visit` starts
+        on any free general `Spot`, with no `Ticket` and no `Kiosk` payment.
+      - >-
+        On exit the customer swipes the `Keycard` again; the `Visit`'s exit time
+        is set and the general `Spot` is freed.
+    invariants_touched:
+      - visit-one-credential
+      - spot-single-occupant
+      - visit-exit-after-entry
+
+  - name: A keycard already in use cannot start a second visit
+    actors: [Keycard, Visit]
+    steps:
+      - A `Keycard` has an active `Visit` — its car is currently in the `Garage`.
+      - Someone presents the same `Keycard` at the entry gate again.
+      - >-
+        The gate stays shut; the `Keycard` cannot start a second `Visit` while
+        its first is still active — the car must exit first.
+    invariants_touched:
+      - keycard-one-active-visit
+
+  - name: Temporary visitor takes a ticket and pays on exit
+    actors: [Ticket, Visit, Spot, Kiosk]
+    steps:
+      - >-
+        A visitor with no `Account` takes a `Ticket` at the gate; the system
+        captures the plate and starts a `Visit` on a general `Spot`, with no
+        `Keycard`.
+      - The visitor parks; the general `Spot` holds one active `Visit`.
+      - >-
+        Before leaving, the visitor pays the `Ticket` at a `Kiosk` in the same
+        `Garage`.
+      - >-
+        With the `Ticket` paid, the exit gate opens; the `Visit`'s exit time is
+        set and the `Spot` is freed.
+    invariants_touched:
+      - visit-one-credential
+      - ticket-paid-before-exit
+      - kiosk-same-garage
+      - spot-single-occupant
+      - visit-exit-after-entry
+
+  - name: Unpaid ticket is refused at exit
+    actors: [Ticket, Visit, Kiosk]
+    steps:
+      - A temporary `Visit` is active with an unpaid `Ticket`.
+      - The visitor drives to the exit without paying at a `Kiosk`.
+      - >-
+        The system refuses to open the exit gate because the `Ticket` is unpaid;
+        the `Visit` stays active and its `Spot` stays occupied.
+    invariants_touched:
+      - ticket-paid-before-exit
+
+  - name: A car not on the account is denied a reserved spot
+    actors: [Spot, Account, Car, Visit]
+    steps:
+      - A reserved `Spot` is assigned to an `Account`.
+      - >-
+        A `Car` that is not registered to that `Account` attempts to park in the
+        reserved `Spot`.
+      - >-
+        The system denies the `Visit`; only a `Car` registered to the assigned
+        `Account` may occupy the reserved `Spot`.
+    invariants_touched:
+      - reserved-spot-restricted
+
+  - name: Garage fills up
+    actors: [Garage, Spot, Visit]
+    steps:
+      - Every `Spot` in the `Garage` holds an active `Visit`.
+      - A new car arrives at the gate.
+      - >-
+        The system has no free `Spot`, so it does not start a new `Visit`; the
+        count of active `Visit`s never exceeds the `Garage`'s `Spot` count.
+    invariants_touched:
+      - garage-capacity
+      - spot-single-occupant

@@ -1,0 +1,78 @@
+version: '3'
+
+# Docusaurus site for modelith.sh.
+# Content lives in ../docs; this file holds only the Docusaurus infra.
+# Run from the repo root via `task site:*` (the root Taskfile includes this
+# file under the `site` namespace with dir: website).
+
+vars:
+  PORT: 3003
+  LOG: dev.log
+
+tasks:
+  install:
+    desc: Install npm dependencies (skipped when package files are unchanged)
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/.package-lock.json
+    cmds:
+      - npm install
+
+  dev:
+    desc: Start the Docusaurus dev server in the background (runs install if needed)
+    deps: [install]
+    cmds:
+      - |
+        if lsof -t -i TCP:{{.PORT}} -s TCP:LISTEN > /dev/null 2>&1; then
+          echo "Dev server already running — http://localhost:{{.PORT}}"
+        else
+          bash -c 'npm run dev -- --host 0.0.0.0 --no-open --port {{.PORT}} >> {{.LOG}} 2>&1 & disown $!'
+          echo "Dev server starting — http://localhost:{{.PORT}}"
+          echo "Logs: tail -f website/{{.LOG}}"
+        fi
+
+  stop:
+    desc: Stop the Docusaurus dev server
+    cmds:
+      - |
+        if lsof -t -i TCP:{{.PORT}} -s TCP:LISTEN > /dev/null 2>&1; then
+          /bin/kill $(lsof -t -i TCP:{{.PORT}} -s TCP:LISTEN) && echo "Dev server stopped"
+        else
+          echo "Dev server not running"
+        fi
+
+  restart:
+    desc: Restart the Docusaurus dev server
+    cmds:
+      - task: stop
+      - task: dev
+
+  status:
+    desc: Show Docusaurus dev server status
+    cmds:
+      - |
+        PID=$(lsof -t -i TCP:{{.PORT}} -s TCP:LISTEN || true)
+        if [ -n "$PID" ]; then
+          echo "Running (PID $PID) — http://localhost:{{.PORT}}"
+        else
+          echo "Not running"
+        fi
+
+  build:
+    desc: Build the Docusaurus site into website/build/
+    deps: [install]
+    cmds:
+      - npm run build
+
+  typecheck:
+    desc: Run TypeScript type-check over website/
+    deps: [install]
+    cmds:
+      - npm run typecheck
+
+  clear:
+    desc: Clear the Docusaurus cache (.docusaurus/ and build/)
+    cmds:
+      - npm run clear

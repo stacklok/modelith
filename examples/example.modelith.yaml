@@ -1,0 +1,132 @@
+# yaml-language-server: $schema=https://modelith.sh/schema/domain-model/v1.json
+kind: DomainModel
+version: v1
+title: Example Domain Model
+description: >
+  A small, illustrative model used in the docs and as a golden fixture for the
+  tooling. It models `Projects`, the `Users` who own them, and the `Policies`
+  they contain.
+
+glossary:
+  Owner: >
+    A `User` with full control of a `Project` — can transfer ownership, archive
+    it, and manage its `Policies`.
+  Member: >
+    A `User` granted access to a `Project` without ownership rights.
+
+enums:
+  ProjectStatus:
+    description: Lifecycle state of a `Project`.
+    values:
+      - name: active
+        definition: In normal use; `Policies` can be enabled.
+      - name: archived
+        definition: Retired and read-only; no `Policies` can be enabled.
+
+entities:
+  Project:
+    definition: >
+      A container for a set of related `Policies`, owned by at least one `User`.
+      `Projects` are the primary unit of organization in the system.
+    relationships:
+      - entity: User
+        cardinality: "n:n"
+        role: "`Owner` or `Member`"
+        ownership: referenced
+        note: Must always have at least one `Owner`
+      - entity: Policy
+        cardinality: "1:n"
+        ownership: owned
+    attributes:
+      - name: status
+        type: ProjectStatus
+      - name: enabledPolicyCount
+        type: integer
+        derived: true
+        derivation: Number of `Policies` in this `Project` whose `enabled` is true.
+    actions:
+      - create
+      - name: archive
+        actor: Owner
+        preserves: [at-least-one-owner, no-archive-with-enabled-policies]
+      - name: transfer_ownership
+        actor: Owner
+        preserves: [at-least-one-owner]
+    invariants:
+      - id: at-least-one-owner
+        statement: "Must have at least one `Owner` at all times"
+      - id: no-archive-with-enabled-policies
+        statement: "Cannot be archived while it has enabled `Policies`"
+
+  User:
+    definition: >
+      A human principal who can own or belong to `Projects`. Identity is managed
+      externally; a `User` here is the in-domain projection of that identity.
+    relationships:
+      - entity: Project
+        cardinality: "n:n"
+        role: "`Owner` or `Member`"
+        ownership: referenced
+    actions: [invite, deactivate]
+    invariants:
+      - id: unique-email
+        statement: "Email address is unique across all `Users`"
+
+  Policy:
+    definition: >
+      A rule set evaluated by the system, belonging to exactly one `Project`. A
+      `Policy` has no meaning outside its owning `Project`.
+    relationships:
+      - entity: Project
+        cardinality: "n:1"
+        ownership: referenced
+        note: The owning `Project`
+    attributes:
+      - name: enabled
+        type: boolean
+    actions: [create, enable, disable, delete]
+    invariants:
+      - id: belongs-to-one-project
+        statement: "Belongs to exactly one `Project`"
+
+scenarios:
+  - name: Transfer project ownership
+    description: >
+      Verifies the at-least-one-owner invariant holds throughout a hand-off:
+      the new `Owner` is added before the previous one steps down.
+    actors: [Owner, TargetUser]
+    steps:
+      - "`Owner` selects `TargetUser` as new `Owner`"
+      - "`Project`.owner updated to `TargetUser`"
+      - "Previous `Owner` role set to `Member`"
+    invariants_touched: [at-least-one-owner]
+
+  - name: Archive a project with enabled policies
+    description: >
+      Stress-tests the no-archive-with-enabled-policies invariant: the system
+      must disable all `Policies` before the `Project` status transitions to
+      archived.
+    actors: [Owner]
+    steps:
+      - "`Owner` attempts to archive a `Project` that still has enabled `Policies`"
+      - "System disables each `Policy` before archiving"
+      - "`Project`.status set to archived"
+    invariants_touched: [no-archive-with-enabled-policies, archived-project-has-no-enabled-policies]
+
+  - name: Invite a user to a project
+    description: >
+      Happy-path onboarding: a new `User` is created if the email is unknown,
+      then added as a `Member`. Verifies email uniqueness is enforced on
+      `User` creation.
+    actors: [Owner, InvitedUser]
+    steps:
+      - "`Owner` invites a `User` by email address to a `Project`"
+      - "A new `User` record is created if the email is not already known"
+      - "The `User` is added to the `Project` as a `Member`"
+    invariants_touched: [unique-email]
+
+# Model-level invariants: cross-entity rules with no single owner. They use the
+# same {id, statement} shape as entity invariants and share one id namespace.
+invariants:
+  - id: archived-project-has-no-enabled-policies
+    statement: "When a `Project` is archived, none of its `Policies` remain enabled."

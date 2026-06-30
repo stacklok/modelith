@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelith.sh/schema/domain-model/v1.json",
+  "title": "Domain Model",
+  "description": "Schema for a domain model: a ubiquitous-language glossary, named enums, entities (with relationships, attributes, actions, and invariants), and scenarios that stress-test the model.",
+  "type": "object",
+  "required": ["kind", "version"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "description": "Identifies the file as a domain model. Always \"DomainModel\".",
+      "type": "string",
+      "const": "DomainModel"
+    },
+    "version": {
+      "description": "Schema revision this file targets. This v1 schema describes only v1; later versions are published at their own URL (.../v2.json, ...). modelith is the source of truth for which versions a given build supports.",
+      "type": "string",
+      "const": "v1"
+    },
+    "title": {
+      "description": "Optional human-readable title for the model, used as the heading when rendered.",
+      "type": "string"
+    },
+    "description": {
+      "description": "Optional one-paragraph summary of what this model covers.",
+      "type": "string"
+    },
+    "glossary": {
+      "description": "Ubiquitous-language terms that are NOT entities — roles, states of being, domain nouns — mapped to their definitions. Any term used as a relationship role or scenario actor should be defined here so the vocabulary is explicit and checkable. Keys are the term in PascalCase (e.g. Owner, Member).",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Z][A-Za-z0-9]+$" },
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "enums": {
+      "description": "First-class enumerated types, keyed by PascalCase name (e.g. ProjectStatus). An attribute selects one by naming it in its \"type\".",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Z][A-Za-z0-9]+$" },
+      "additionalProperties": { "$ref": "#/$defs/enum" }
+    },
+    "entities": {
+      "description": "The named concepts in the domain, keyed by their canonical PascalCase name.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Za-z0-9]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/entity"
+      }
+    },
+    "scenarios": {
+      "description": "Short narratives that exercise entities and actions to stress-test the model.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scenario"
+      }
+    },
+    "invariants": {
+      "description": "Model-level rules that span several entities and have no single owner. Same shape as entity invariants; ids share one namespace with entity invariants and must be unique across the whole model.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/invariant"
+      }
+    }
+  },
+  "$defs": {
+    "enum": {
+      "title": "Enum",
+      "type": "object",
+      "required": ["values"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "description": "What this enumerated type represents.",
+          "type": "string"
+        },
+        "values": {
+          "description": "The allowed values, each optionally with a definition so its meaning is part of the ubiquitous language.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/enumValue" }
+        }
+      }
+    },
+    "enumValue": {
+      "title": "Enum Value",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "definition": {
+          "description": "What this value means — so a state like \"active\" has a single agreed meaning.",
+          "type": "string"
+        }
+      }
+    },
+    "entity": {
+      "title": "Entity",
+      "type": "object",
+      "required": ["definition"],
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "description": "Two to four sentences: what it is, what it is not, what distinguishes it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "relationships": {
+          "description": "How this entity relates to others. A relationship is declared under one entity and names a target; it may be declared from either end (the linter checks that the two views agree). When one entity is intuitively the parent — it owns or contains the other, or is the \"one\" side of a one-to-many — prefer declaring the relationship there.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relationship"
+          }
+        },
+        "attributes": {
+          "description": "Key properties of the entity that matter for domain reasoning — not every database column. Mark computed values with derived: true.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attribute"
+          }
+        },
+        "actions": {
+          "description": "Mutations the system exposes for this entity. Each is a bare name (e.g. \"create\") or a structured object linking the action to the actor that performs it and the invariants it must preserve.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        },
+        "invariants": {
+          "description": "Rules that must always hold. Each has a stable id (so scenarios and actions can reference it) and a short, declarative, testable statement.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/invariant"
+          }
+        }
+      }
+    },
+    "relationship": {
+      "title": "Relationship",
+      "type": "object",
+      "required": ["entity", "cardinality"],
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "description": "Name of the related entity. Must reference a defined entity.",
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]+$"
+        },
+        "cardinality": {
+          "description": "Relationship cardinality.",
+          "type": "string",
+          "enum": ["1:1", "1:n", "n:1", "n:n"]
+        },
+        "role": {
+          "description": "What role the related entity plays (freeform; backtick entity names). A role name like `Owner` should be defined in the glossary.",
+          "type": "string"
+        },
+        "ownership": {
+          "description": "Whether the related entity is part of this one. \"owned\" = it cannot exist independently of this entity (composition: it is created within, and deleted with, this entity). \"referenced\" = an independent entity this one merely points at. Omitting ownership means \"referenced\".",
+          "type": "string",
+          "enum": ["owned", "referenced"],
+          "default": "referenced"
+        },
+        "note": {
+          "description": "Additional freeform note about the relationship.",
+          "type": "string"
+        }
+      }
+    },
+    "attribute": {
+      "title": "Attribute",
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "Conceptual type: a primitive (e.g. \"string\", \"integer\", \"boolean\", \"timestamp\") or the PascalCase name of an enum defined under top-level \"enums\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "derived": {
+          "description": "True if this attribute is computed from other state rather than stored. Forces a \"derivation\" explaining how. Keeps newcomers from modeling derived values as persisted columns.",
+          "type": "boolean"
+        },
+        "derivation": {
+          "description": "How a derived attribute is computed (required when derived is true).",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "if": {
+        "properties": { "derived": { "const": true } },
+        "required": ["derived"]
+      },
+      "then": {
+        "required": ["derivation"]
+      },
+      "else": {
+        "$comment": "derivation is only allowed when derived: true",
+        "properties": { "derivation": false }
+      }
+    },
+    "action": {
+      "title": "Action",
+      "description": "A mutation the system exposes: either a bare name string or a structured object with actor, preserves, and description.",
+      "oneOf": [
+        {
+          "description": "A bare action name.",
+          "type": "string",
+          "minLength": 1
+        },
+        { "$ref": "#/$defs/actionObject" }
+      ]
+    },
+    "actionObject": {
+      "title": "Action (structured)",
+      "description": "Structured action linking the mutation to its actor and the invariants it must preserve.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actor": {
+          "description": "Who performs the action — a defined entity or a glossary term/role (e.g. Owner).",
+          "type": "string",
+          "minLength": 1
+        },
+        "preserves": {
+          "description": "Ids of invariants this action must preserve.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "invariant": {
+      "title": "Invariant",
+      "type": "object",
+      "required": ["id", "statement"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Stable identifier (lowercase kebab-case), referenced by scenarios (invariants_touched) and actions (preserves). Renaming the statement does not break references.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]+$"
+        },
+        "statement": {
+          "description": "The rule. Short, declarative, testable. Backtick entity names.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "scenario": {
+      "title": "Scenario",
+      "type": "object",
+      "required": ["name", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "description": "Short prose summary of what this scenario tests or demonstrates.",
+          "type": "string"
+        },
+        "actors": {
+          "description": "The actors involved, named either as a defined entity (e.g. \"User\") or as a glossary role (e.g. \"Owner\"). Unlike freeform text, these are not backticked.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "steps": {
+          "description": "Ordered steps. Backtick entity names in freeform text.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "invariants_touched": {
+          "description": "Ids of invariants this scenario exercises. Each must reference an invariant declared on some entity.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

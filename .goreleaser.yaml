@@ -1,0 +1,54 @@
+version: 2
+project_name: modelith
+
+builds:
+  - id: modelith
+    main: ./cmd/modelith
+    binary: modelith
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: modelith
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: checksum
+    output: true
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  prerelease: auto
+
+# The GoReleaser binary version is pinned in the release workflow
+# (goreleaser-action `version:`), not floated, so releases are reproducible.

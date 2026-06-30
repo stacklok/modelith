@@ -1,0 +1,105 @@
+version: "3"
+
+includes:
+  site:
+    taskfile: website/Taskfile.yml
+    dir: website
+
+# Every *.modelith.yaml the repo treats as a golden fixture: the root example
+# and the worked example embedded in the docs. Both are linted strictly and their
+# committed .md is render-checked, so neither can drift from real tool output.
+vars:
+  EXAMPLES: examples/*.modelith.yaml docs/05-parking-garage/*.modelith.yaml
+  # Stamp local builds with a version. Go's own VCS stamping
+  # (debug.ReadBuildInfo) doesn't fire in some worktree layouts, so we set it
+  # explicitly. goreleaser overrides this with the release tag.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  LDFLAGS: -X main.version={{.VERSION}}
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the modelith binary into ./bin
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o bin/modelith ./cmd/modelith
+
+  install:
+    desc: go install modelith into GOBIN
+    cmds:
+      - go install -ldflags "{{.LDFLAGS}}" ./cmd/modelith
+
+  test:
+    desc: Run unit tests with cross-package coverage
+    cmds:
+      # -coverpkg=./... credits each package for code exercised by ANY package's
+      # tests, so the reported numbers reflect real coverage. Without it, helpers
+      # in internal/schema and internal/model that are driven only by lint/cmd
+      # tests show a misleadingly low per-package figure.
+      - go test -race -coverpkg=./... -coverprofile=coverage.out ./...
+
+  cover:
+    desc: Show the per-function coverage report (run `task test` first)
+    cmds:
+      - go tool cover -func=coverage.out
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  staticcheck:
+    desc: Run staticcheck (pinned version)
+    cmds:
+      - go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format all Go code
+    cmds:
+      - gofmt -w .
+
+  tidy:
+    desc: Tidy go.mod / go.sum
+    cmds:
+      - go mod tidy
+
+  lint-models:
+    desc: Lint the example domain models (strict — completeness gaps are errors)
+    cmds:
+      - go run ./cmd/modelith lint --completeness error {{.EXAMPLES}}
+
+  render:
+    desc: Render the example domain models to Markdown
+    cmds:
+      - for f in {{.EXAMPLES}}; do go run ./cmd/modelith render "$f"; done
+
+  render-check:
+    desc: Verify committed Markdown is up to date (used in CI)
+    cmds:
+      - for f in {{.EXAMPLES}}; do go run ./cmd/modelith render --check "$f"; done
+
+  validate-plugin:
+    desc: Validate the Claude Code plugin manifest + skill frontmatter (needs the `claude` CLI)
+    cmds:
+      - claude plugin validate ./plugin --strict
+
+  check:
+    desc: CI parity (vet, staticcheck, golangci-lint, test, lint models, render-check) plus the local-only claude-based validate-plugin (CI does a lighter jq check instead)
+    cmds:
+      - task: vet
+      - task: staticcheck
+      - task: lint
+      - task: test
+      - task: lint-models
+      - task: render-check
+      - task: validate-plugin

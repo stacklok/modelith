@@ -1,0 +1,37 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck      # swallowed errors
+    - gosec         # security
+    - exhaustive    # switch exhaustiveness over Go enum types
+    - ineffassign   # useless assignments
+    - misspell      # spelling in comments and strings
+
+  settings:
+    errcheck:
+      exclude-functions:
+        # strings.Builder never errors; ignoring its returns is idiomatic Go.
+        - (*strings.Builder).Write
+        - (*strings.Builder).WriteByte
+        - (*strings.Builder).WriteRune
+        - (*strings.Builder).WriteString
+        # fmt.Fprintf/Fprintln to a cobra output writer is best-effort logging;
+        # errors are unactionable in a CLI context.
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+
+    gosec:
+      excludes:
+        # G304: file paths from command-line args are expected for a CLI tool.
+        - G304
+        # G306: rendered .md files are committed docs — 0o644 is intentional.
+        - G306
+        # G703: output path is derived from the user-supplied input path — expected
+        # behavior for a CLI tool that writes sibling .md files.
+        - G703
+
+    exhaustive:
+      default-signifies-exhaustive: true

@@ -1,0 +1,78 @@
+name: "Modelith"
+description: "Lint domain-model YAML and verify the committed Markdown is up to date. Requires Linux or macOS runners (Windows not supported)."
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  files:
+    description: "Domain-model YAML files or globs, space-, comma-, or newline-separated."
+    required: true
+  completeness:
+    description: "Treat completeness gaps as 'warn' or 'error'."
+    required: false
+    default: "warn"
+  check-rendered:
+    description: "Verify the committed *.md output matches the YAML (render --check)."
+    required: false
+    default: "true"
+  go-version:
+    description: "Go version used to build modelith from source. Defaults to 'stable' (latest stable Go), which means callers opt into new minor versions automatically. Pin to e.g. '1.26.x' if you need reproducible builds."
+    required: false
+    default: "stable"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache-dependency-path: ${{ github.action_path }}/go.sum
+
+    - name: Build modelith
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: go build -o "${{ runner.temp }}/modelith" ./cmd/modelith
+
+    - name: Lint and check
+      shell: bash
+      env:
+        MODELITH: ${{ runner.temp }}/modelith
+        FILES_INPUT: ${{ inputs.files }}
+        COMPLETENESS: ${{ inputs.completeness }}
+        CHECK_RENDERED: ${{ inputs.check-rendered }}
+      run: |
+        set -euo pipefail
+        shopt -s globstar nullglob
+
+        # Split the file list on commas/whitespace/newlines into glob patterns,
+        # then expand each. No xargs — it would mangle quotes/backslashes; here we
+        # just want plain word-splitting + globbing. (read -d '' returns non-zero
+        # at EOF, hence the `|| true`.)
+        IFS=$' \t\n,' read -rd '' -a patterns <<< "$FILES_INPUT" || true
+        files=()
+        for p in "${patterns[@]}"; do
+          for f in $p; do files+=("$f"); done
+        done
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "::error::No files matched: $FILES_INPUT (did the workflow run actions/checkout before this step, and are the paths correct?)"
+          exit 1
+        fi
+        echo "Linting: ${files[*]}"
+
+        "$MODELITH" lint --completeness "$COMPLETENESS" "${files[@]}"
+
+        # Accept common boolean spellings; fail loudly on anything unrecognized
+        # rather than silently skipping the render check.
+        case "${CHECK_RENDERED,,}" in
+          true | yes | 1)
+            for f in "${files[@]}"; do
+              "$MODELITH" render --check "$f"
+            done
+            ;;
+          false | no | 0 | "") ;;
+          *)
+            echo "::error::check-rendered must be true or false, got: $CHECK_RENDERED"
+            exit 1
+            ;;
+        esac

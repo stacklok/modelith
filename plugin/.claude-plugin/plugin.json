@@ -1,0 +1,10 @@
+{
+  "name": "modelith",
+  "version": "0.1.0",
+  "description": "Author, validate, and render domain models. Build the model by conversation; the skills draft the YAML, run the linter, and keep the rendered Markdown in sync.",
+  "author": {
+    "name": "Stacklok"
+  },
+  "homepage": "https://github.com/stacklok/modelith",
+  "keywords": ["modelith", "domain-model", "ddd", "modeling"]
+}

@@ -1,0 +1,230 @@
+/* ─── Google Fonts ───────────────────────────────────────────────────────── */
+/*                                                                            */
+/*  Using free OFL alternates for the commercial Stacklok brand fonts:       */
+/*    Merriweather Light → Rhetorik Serif (headlines)                        */
+/*    Figtree             → Brut Grotesque (body/UI)                         */
+/*    Space Mono          → Repro Mono (code)                                */
+/*                                                                            */
+/*  Do NOT embed Rhetorik Serif, Brut Grotesque, or Repro Mono here —        */
+/*  those are commercial/licensed and cannot be redistributed in an          */
+/*  open-source project. See docs/brand/index.mdx in stacklok/engineering.  */
+
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400&family=Figtree:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+/* ─── Stacklok brand tokens ──────────────────────────────────────────────── */
+/*                                                                            */
+/*  Source: "Stacklok Brand Guidelines," April 2026 deck + engineering repo  */
+/*  docs/brand/index.mdx. Greens are primary; teal is secondary/accent.      */
+/*  #022A33 is the April 2026 deck-cover background ("pressed action").      */
+
+:root {
+  /* Greens — primary family */
+  --sl-green-light:   #DFF2E2;
+  --sl-green-grass:   #BDDFC2;
+  --sl-green-bright:  #428D68;
+  --sl-green-leaf:    #2D684B;
+  --sl-green-dark:    #003C1F;
+
+  /* Neutrals */
+  --sl-white:         #FFFFFF;
+  --sl-fluorescent:   #F9FAF9;
+  --sl-cookie:        #E2E2DC;
+  --sl-sunset:        #2B303B;
+  --sl-dusk:          #212121;
+
+  /* Teal — secondary/accent */
+  --sl-teal-sky:      #D4EDF1;
+  --sl-teal-mid:      #538B98;
+  --sl-teal-deep:     #265763;
+  --sl-teal-press:    #022A33;   /* deck-cover background */
+
+  /* Derived site tokens */
+  --sl-bg:            var(--sl-teal-press);   /* #022A33 */
+  --sl-surface:       #083340;
+  --sl-surface-2:     #0e4050;
+  --sl-border:        #1a4a56;
+  --sl-text:          var(--sl-fluorescent);
+  --sl-text-muted:    #8fb4bc;
+}
+
+/* ─── Docusaurus overrides — dark only ───────────────────────────────────── */
+
+:root,
+[data-theme='dark'] {
+  /* Primary = Bright green (high contrast on the dark teal bg) */
+  --ifm-color-primary:          var(--sl-green-bright);
+  --ifm-color-primary-dark:     #3a7d5c;
+  --ifm-color-primary-darker:   #347053;
+  --ifm-color-primary-darkest:  var(--sl-green-leaf);
+  --ifm-color-primary-light:    #52a87e;
+  --ifm-color-primary-lighter:  #6abf94;
+  --ifm-color-primary-lightest: var(--sl-green-grass);
+
+  /* Typography */
+  --ifm-font-family-base:       'Figtree', system-ui, -apple-system, sans-serif;
+  --ifm-heading-font-family:    'Merriweather', Georgia, serif;
+  --ifm-font-family-monospace:  'Space Mono', 'SFMono-Regular', Menlo, monospace;
+  --ifm-font-weight-base:       400;
+  --ifm-heading-font-weight:    300;
+  --ifm-code-font-size:         85%;
+
+  /* Backgrounds */
+  --ifm-background-color:         var(--sl-bg);
+  --ifm-background-surface-color: var(--sl-surface);
+  --ifm-navbar-background-color:  var(--sl-bg);
+  --ifm-navbar-shadow:            0 1px 0 0 var(--sl-border);
+  --ifm-footer-background-color:  #011e25;
+
+  /* Text */
+  --ifm-font-color-base:          var(--sl-text);
+  --ifm-font-color-secondary:     var(--sl-text-muted);
+  --ifm-heading-color:            var(--sl-text);
+
+  /* Borders / dividers */
+  --ifm-toc-border-color:         var(--sl-border);
+  --ifm-hr-border-color:          var(--sl-border);
+  --ifm-color-emphasis-300:       var(--sl-border);
+  --ifm-color-emphasis-600:       #2a6070;
+
+  /* Code blocks */
+  --ifm-code-background:                   var(--sl-surface-2);
+  --docusaurus-highlighted-code-line-bg:   rgba(66, 141, 104, 0.15);
+
+  /* Links */
+  --ifm-link-color:               var(--sl-green-grass);
+  --ifm-link-hover-color:         var(--sl-green-light);
+
+  /* Sidebar */
+  --ifm-sidebar-width:            272px;
+
+  /* Menu */
+  --ifm-menu-color:               var(--sl-text-muted);
+  --ifm-menu-color-active:        var(--sl-green-grass);
+  --ifm-menu-color-background-active: rgba(189, 223, 194, 0.1);
+  --ifm-menu-color-background-hover:  rgba(255, 255, 255, 0.04);
+}
+
+/* ─── Navbar ─────────────────────────────────────────────────────────────── */
+
+.navbar {
+  --ifm-navbar-link-color:        var(--sl-text-muted);
+  --ifm-navbar-link-hover-color:  var(--sl-text);
+  --ifm-navbar-link-active-color: var(--sl-green-grass);
+  border-bottom: 1px solid var(--sl-border);
+}
+
+.navbar__title {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 700;
+  font-size: var(--ifm-navbar-link-font-size);
+  color: var(--sl-text);
+}
+
+.navbar__logo {
+  height: 22px;
+  width: auto;
+  margin-right: 0.5rem;
+}
+
+/* ─── Sidebar category labels ─────────────────────────────────────────────── */
+
+.theme-doc-sidebar-item-category > .menu__list-item-collapsible > .menu__link {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 600;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sl-teal-mid);
+  opacity: 0.9;
+}
+
+/* ─── Headings ───────────────────────────────────────────────────────────── */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Merriweather', Georgia, serif;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  color: var(--sl-text);
+  border-bottom: 1px solid var(--sl-border);
+  padding-bottom: 0.4rem;
+}
+
+h3 { color: var(--sl-green-grass); }
+
+/* ─── Code ───────────────────────────────────────────────────────────────── */
+
+code {
+  background: var(--sl-surface-2);
+  border: 1px solid var(--sl-border);
+  color: var(--sl-green-grass);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.theme-code-block {
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* wrapLongLines is not implemented in Docusaurus 3.x — enforce wrapping via CSS. */
+.theme-code-block pre {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* ─── Tables ─────────────────────────────────────────────────────────────── */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th {
+  background: var(--sl-surface-2);
+  color: var(--sl-green-grass);
+  font-family: 'Figtree', sans-serif;
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--sl-green-leaf);
+}
+
+td, th {
+  border: 1px solid var(--sl-border);
+  padding: 0.6rem 0.85rem;
+}
+
+tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* ─── Admonitions ────────────────────────────────────────────────────────── */
+
+.alert--info    { --ifm-alert-background-color: rgba(83, 139, 152, 0.1); border-color: var(--sl-teal-deep); }
+.alert--warning { --ifm-alert-background-color: rgba(66, 141, 104, 0.12); border-color: var(--sl-green-leaf); }
+.alert--success { --ifm-alert-background-color: rgba(189, 223, 194, 0.08); border-color: var(--sl-green-leaf); }
+
+/* ─── Footer ─────────────────────────────────────────────────────────────── */
+
+.footer {
+  border-top: 1px solid var(--sl-border);
+}
+
+.footer__title {
+  font-family: 'Figtree', sans-serif;
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sl-teal-mid);
+}
+
+.footer__copyright {
+  color: var(--sl-text-muted);
+  font-size: 0.85rem;
+}

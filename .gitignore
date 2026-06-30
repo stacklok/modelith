@@ -1,0 +1,11 @@
+/bin/
+/dist/
+# The built binary at repo root (anchored so it does not match the cmd/modelith/ dir).
+/modelith
+*.out
+
+# Task runner checksums (local state, not repo artifacts)
+.task/
+
+# Personal Claude Code settings (permission grants, etc.)
+.claude/settings.local.json
