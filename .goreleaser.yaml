@@ -28,20 +28,34 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+brews:
+  - name: modelith
+    homepage: "https://github.com/stacklok/modelith"
+    description: "Tooling for authoring, validating, and rendering domain models"
+    directory: Formula
+    commit_author:
+      name: stacklokbot
+      email: info@stacklok.com
+    repository:
+      owner: stacklok
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    test: |
+      system "#{bin}/modelith --version"
+
 sboms:
   - artifacts: archive
 
 signs:
   - cmd: cosign
-    certificate: "${artifact}.pem"
     args:
       - sign-blob
-      - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
+      - "--bundle=${signature}"
       - "${artifact}"
-    artifacts: checksum
+      - "--yes"
+    artifacts: archive
     output: true
+    signature: "${artifact}.sigstore.json"
 
 changelog:
   use: github
