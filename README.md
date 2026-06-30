@@ -52,21 +52,22 @@ go install github.com/stacklok/modelith/cmd/modelith@latest
 
 **2. Install the Claude Code plugin** (the skills that author the model):
 
-> **Not yet in the marketplace.** The commands below will work once the plugin is
-> published to `anthropics/claude-plugins-community` (roadmap item). Until then,
-> install from a local checkout — see
-> [Developing the plugin locally](https://modelith.sh/local-development#developing-the-plugin-locally).
+> **Marketplace listing pending review.** The plugin has been submitted to
+> `anthropics/claude-plugins-community` and is awaiting approval — **the
+> commands below will fail until it's listed.** In the meantime, use the
+> skills CLI below, which works today.
 
-```sh
-# coming soon — will work after marketplace submission
-claude plugin marketplace add anthropics/claude-plugins-community
-claude plugin install modelith@claude-community
-```
-
-Or with the [skills CLI](https://skills.sh) (also works with Cursor, Windsurf, and others):
+Install with the [skills CLI](https://skills.sh) (also works with Cursor, Windsurf, and others):
 
 ```sh
 npx skills add stacklok/modelith
+```
+
+Once the marketplace listing is approved:
+
+```sh
+claude plugin marketplace add anthropics/claude-plugins-community
+claude plugin install modelith@claude-community
 ```
 
 **3. Author by conversation.** In Claude Code, invoke `/modelith:domain-model-author`
@@ -110,7 +111,7 @@ dev workflow, and the conventions to keep.
 - [x] GitHub Action + GoReleaser + CI
 - [x] Claude Code plugin + skills (author / lint / context)
 - [x] Docs at [modelith.sh](https://modelith.sh)
-- [ ] Published to `anthropics/claude-plugins-community`
+- [ ] Published to `anthropics/claude-plugins-community` (submitted, pending review)
 - [ ] Serve the schema at `modelith.sh` (editor autocomplete)
 - [ ] Scenario `sequenceDiagram` rendering (Markdown-only today)
 

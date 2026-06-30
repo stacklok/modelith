@@ -35,18 +35,30 @@ The skills ship as a **Claude Code plugin**. The plugin files live in
 [`plugin/`](https://github.com/stacklok/modelith/tree/main/plugin), next to
 the binary they drive, so the skills and CLI version stay in lockstep.
 
-:::caution[Not yet published in the marketplace]
+:::caution[Marketplace listing pending review]
 
-The `claude plugin marketplace` commands below are the intended install path, but
-the plugin hasn't been submitted to `anthropics/claude-plugins-community` yet (see
-the [roadmap](/)). **These commands will fail until the plugin is published.**
+The plugin has been submitted to `anthropics/claude-plugins-community` and is
+awaiting Anthropic's approval. **The `claude plugin marketplace` commands below
+will fail until it's listed.**
 
-In the meantime, install from a local checkout:
+In the meantime, use the skills CLI below, which doesn't depend on the
+marketplace listing, or install from a local checkout:
 [Developing the plugin locally](./09-local-development.md#developing-the-plugin-locally).
 
 :::
 
-Once the plugin is published, add the community marketplace once, then install:
+### Skills CLI install (works today)
+
+Install with the [skills CLI](https://skills.sh) (also works with Cursor,
+Windsurf, and other agents) — this doesn't depend on the marketplace listing:
+
+```sh
+npx skills add stacklok/modelith
+```
+
+### Marketplace install (once approved)
+
+Add the community marketplace once, then install:
 
 ```sh
 claude plugin marketplace add anthropics/claude-plugins-community
@@ -57,13 +69,6 @@ Restart Claude Code (plugin changes apply on the next session). The skills are
 namespaced under the plugin name — invoke them as `/modelith:domain-model-author`,
 `/modelith:domain-model-lint`, and `/modelith:domain-model-context`. You can also
 browse and install interactively with the `/plugin` command.
-
-Alternatively, install with the [skills CLI](https://skills.sh) (also works with
-Cursor, Windsurf, and other agents):
-
-```sh
-npx skills add stacklok/modelith
-```
 
 <details>
 <summary>If the install looks like it did nothing</summary>
