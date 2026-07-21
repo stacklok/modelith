@@ -22,9 +22,12 @@ modelith/
 │       ├── schema.go
 │       └── v1/modelith.schema.json   # canonical v1 schema (to be served at modelith.sh)
 ├── examples/                     # worked example: *.modelith.yaml + committed *.md (golden)
-├── docs/                         # Docusaurus-importable docs
+├── docs/                         # Docusaurus-importable docs (published at modelith.sh)
 ├── plugin/                       # Claude Code plugin (skills/)
-├── audits/                       # dated design-decision records
+├── project-docs/                 # durable project records (not published)
+│   ├── adr/                      # forward-looking decision records
+│   └── audits/                   # retrospective multi-agent audit snapshots
+├── .claude/rules/                # path-triggered coding/process conventions
 ├── action.yml · Taskfile.yml · .goreleaser.yaml · .github/workflows/
 ```
 
@@ -126,7 +129,42 @@ publishes the GitHub Release, and pushes the Homebrew formula to
 
 ## Design history
 
-[`audits/`](./audits/) holds dated audit + design-decision records (rationale for
-the choices above) and the process for running new ones. The only known open
-follow-up is a release-branch guard for `release.yml`, tracked as
-[issue #1](https://github.com/stacklok/modelith/issues/1).
+Durable project records live under [`project-docs/`](./project-docs/), kept off
+the published site to keep the root clean:
+
+- [`project-docs/adr/`](./project-docs/adr/) — **forward-looking** decision
+  records. When you make a hard-to-reverse call with real trade-offs, record it
+  as an ADR so intentions stay current. Shape and bar:
+  [`.claude/rules/adr.md`](./.claude/rules/adr.md).
+- [`project-docs/audits/`](./project-docs/audits/) — **retrospective**
+  multi-agent audit snapshots (rationale for the choices above) and the process
+  for running new ones.
+
+The only known open follow-up is a release-branch guard for `release.yml`,
+tracked as [issue #1](https://github.com/stacklok/modelith/issues/1).
+
+## Working conventions
+
+- **Every commit must be signed off (DCO).** Commit with `git commit -s` so a
+  `Signed-off-by:` trailer is added, certifying you have the right to submit
+  the change under the project's license. `.github/workflows/dco.yml` enforces
+  this on every commit in a PR and fails the check if any commit lacks the
+  trailer. Details: [`dco.md`](./dco.md).
+- **Coding and process rules are path-triggered.**
+  [`.claude/rules/`](./.claude/rules/) holds `go-style.md`, `testing.md`,
+  `adr.md`, and `agent-workflow.md`; each declares the paths it governs and
+  loads when you edit a matching file. Where a rule file and this file disagree
+  on a point it covers, the rule file wins.
+- **Non-trivial or risky code changes** follow the subagent review-loop and
+  model-discipline protocol in
+  [`.claude/rules/agent-workflow.md`](./.claude/rules/agent-workflow.md). It is
+  available discipline for changes that put a correctness-critical surface at
+  risk, not a mandate on every commit.
+- **Scratch work** (spikes, smoke tests, throwaway fixtures, review
+  round-records) goes in the repo-local, gitignored
+  [`.scratch/`](./.scratch/) — not `/tmp` or a session temp dir. It stays
+  browsable in the checkout; clean it manually when stale.
+- **`HANDOFF.md`** (repo root, gitignored, local-only) holds running state:
+  current state, decisions in flight, ordered next steps. Update it before
+  ending a significant session. Never commit it or reference it from tracked
+  files.

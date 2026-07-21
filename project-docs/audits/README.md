@@ -21,7 +21,7 @@ findings in a stable format we can:
 ## Layout
 
 ```
-audits/
+project-docs/audits/
 ├── README.md                          # this file — the process
 ├── TODO.md                            # prompts for scheduled audits
 └── YYYY-MM-DD-<slug>.md               # one record per audit run

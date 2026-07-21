@@ -9,3 +9,12 @@
 
 # Personal Claude Code settings (permission grants, etc.)
 .claude/settings.local.json
+
+# Repo-local scratch space: browsable in the checkout, never committed.
+# The README is the one tracked file so the directory documents itself.
+/.scratch/*
+!/.scratch/README.md
+
+# Local-only running-state file (current state, decisions in flight, next
+# steps). Never committed; see CLAUDE.md.
+/HANDOFF.md
