@@ -15,7 +15,7 @@ Use the `/code-review` skill or fan out agents manually. Suggested lenses:
 
 | Lens | Model | Charter |
 | --- | --- | --- |
-| **Internal-ref sweep** | Haiku | Every file in `docs/`, `plugin/`, `README.md`, `CLAUDE.md`, `audits/`, `action.yml`, `Taskfile.yml`, `.github/workflows/`, `.goreleaser.yaml`. Hunt for: any mention of internal tooling, private repos, Stacklok-internal URLs, GOPRIVATE, proprietary language, NDA language, pre-release product names or codenames, internal Slack channels or runbooks, anything that assumes the reader is a Stacklok employee. Report every hit with file + line. |
+| **Internal-ref sweep** | Haiku | Every file in `docs/`, `plugin/`, `README.md`, `CLAUDE.md`, `audits/`, `action.yml`, `Taskfile.yml`, `.github/workflows/`, `.goreleaser.yaml`. Hunt for: any mention of internal tooling, private repos, Stacklok-internal URLs, GOPRIVATE, proprietary language, NDA language, pre-release product names or codenames, internal Slack channels or runbooks, anything that assumes the reader is a Stacklok employee. Report every hit with file + line. Include `project-docs/`. |
 | **License / legal** | Haiku | Every file. Confirm `LICENSE` is Apache 2.0. Check for any file-level copyright headers that still say "All rights reserved" or reference proprietary licensing. Check `go.mod` dependencies for license-compatibility problems (GPL, etc.). |
 | **CLI / DX** | Haiku | `cmd/modelith/`, `action.yml`, `README.md`. Command/flag coherence, exit codes, help text, output streams, README-vs-impl drift. Mechanical rubric check: does every documented flag exist? does every existing flag appear in `--help`? do exit codes match documented behavior? |
 | **DevOps / GH** | Sonnet | `.github/workflows/*.yml`, `action.yml`, `.goreleaser.yaml`, `Taskfile.yml`, `go.mod`. CI coverage and caching, action versions and Node compatibility, build-from-source design, release correctness, `go.mod` dependency hygiene. Apply public-project standards — no "internal only" dismissals. |
@@ -29,7 +29,7 @@ Use the `/code-review` skill or fan out agents manually. Suggested lenses:
 ## What to do with findings
 
 Record this audit in a new `YYYY-MM-DD-pre-oss-audit.md` file using the template
-in `audits/README.md`. Triage before fixing: mark each finding `easy`, `Q`,
+in `project-docs/audits/README.md`. Triage before fixing: mark each finding `easy`, `Q`,
 `design`, or `—`. Fix everything `easy` before opening the repo. Anything `Q`
 needs a decision first. Park `design` items as issues.
 
