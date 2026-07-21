@@ -30,7 +30,11 @@ jobs:
         run: |
           set -euo pipefail
           pinned=$(yq '.inputs.version.default' action.yml)
-          latest=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+          # `gh release list` returns an empty array (exit 0) when there are no
+          # releases, but a non-zero exit on a real API error — so `set -e`
+          # surfaces a genuine failure instead of it masquerading as "no release
+          # yet" and silently skipping the guard.
+          latest=$(gh release list --json tagName,isLatest --jq 'map(select(.isLatest)) | .[0].tagName // ""')
           if [ -z "$latest" ]; then
             echo "No published release yet; nothing to compare against."
             exit 0
