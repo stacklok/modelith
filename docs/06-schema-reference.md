@@ -202,6 +202,34 @@ A scenario is a diagnostic, not a backlog item: it tests whether the entities
 and actions actually hang together. If writing one reveals an invariant that
 can't be satisfied — or that doesn't exist yet — fix the model, not the scenario.
 
+## What this format deliberately leaves out
+
+modelith is a light, agent-authored subset of domain-driven design, not a full
+DDD notation. Several classic DDD concepts are left out on purpose. Knowing what
+is *not* here is as useful as knowing what is.
+
+- **Aggregates and aggregate roots.** There is no first-class aggregate
+  boundary. A consistency boundary is expressed by the invariants that must hold
+  and the entity that owns them, not by a declared aggregate. Deliberate: the
+  boundary lives in the rules, which the format already captures.
+- **Value objects.** There is no value-object type. Model a value-shaped concept
+  as an owned entity or as attributes on its owner. The parking-garage example
+  models `Ticket` this way and names the tension. First-class structured value
+  types are being explored
+  ([issue #11](https://github.com/stacklok/modelith/issues/11)).
+- **Domain events.** There is no event construct. A state change is expressed as
+  an `action` plus the invariants it `preserves`, and enums **name** states
+  while invariants govern the legal transitions between them. Deliberate, and
+  consistent with why enums carry no transition edges.
+- **Bounded contexts and context maps.** One model is one context. There is no
+  construct for relating multiple contexts or mapping shared concepts across
+  them. Compose several `*.modelith.yaml` models at the repository level instead
+  of expressing context boundaries inside one file.
+
+These omissions keep the format small enough for an agent to author reliably and
+for a human to read in one sitting. Any of them can become a roadmap item if a
+real model needs it; none is here yet beyond what is linked above.
+
 ## What the linter adds on top of the schema
 
 The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
@@ -226,3 +254,8 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
 - **Completeness** checks (advisory warnings): entities with no invariants;
   entities no scenario exercises; a glossary term nothing references; an enum no
   attribute uses.
+
+  These are advisory on purpose. An entity that genuinely has no rule to state
+  is fine — leave its invariants empty rather than inventing a filler rule that
+  only restates its cardinality or its type. The warning is a prompt to check,
+  not a demand to fill.

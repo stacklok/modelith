@@ -1,0 +1,42 @@
+name: Action version pin
+
+# action.yml pins a specific modelith release as its `version` input default.
+# That bump is a manual step after every release (see CLAUDE.md's release
+# checklist) and nothing else catches a forgotten one — a stale default just
+# keeps installing an old release with no error. This guard compares the pinned
+# default against the latest published release.
+
+on:
+  push:
+    branches: [main]
+    paths: [action.yml]
+  pull_request:
+    paths: [action.yml]
+  # Catch a forgotten post-release bump even when no PR touches action.yml.
+  schedule:
+    - cron: "17 8 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: action.yml version default matches the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pinned=$(yq '.inputs.version.default' action.yml)
+          latest=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+          if [ -z "$latest" ]; then
+            echo "No published release yet; nothing to compare against."
+            exit 0
+          fi
+          echo "action.yml pins: $pinned ; latest release: $latest"
+          if [ "$pinned" != "$latest" ]; then
+            echo "::error file=action.yml::action.yml version default ($pinned) does not match the latest release ($latest). Bump the 'version' input default — see CLAUDE.md's release checklist."
+            exit 1
+          fi
