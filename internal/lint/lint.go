@@ -498,7 +498,7 @@ func runCompleteness(m *model.Model, res *Result) {
 				Severity: SeverityWarning,
 				Category: CategoryCompleteness,
 				Path:     fmt.Sprintf("/entities/%s", name),
-				Message:  fmt.Sprintf("entity %q has no invariants — the rules that govern it are where the real behavior lives", name),
+				Message:  fmt.Sprintf("entity %q has no invariants — fine if no rule must always hold for it, otherwise the rules that govern it are worth capturing", name),
 			})
 		}
 	}
