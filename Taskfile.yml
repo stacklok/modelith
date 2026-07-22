@@ -55,6 +55,14 @@ tasks:
 
   staticcheck:
     desc: Run staticcheck (pinned version)
+    # staticcheck v0.7.0 is a Go 1.25-era release. Run as `go run …@v0.7.0`, its
+    # own go.mod makes the toolchain resolve to 1.25.x, and a 1.25-built
+    # staticcheck can't analyze this module's go1.26 code ("package requires
+    # newer Go version go1.26"). Force a floor of go1.26 (auto-upgrading if a
+    # newer toolchain is the default) so staticcheck is built by go1.26+. Drop
+    # this once staticcheck v0.8.0 ships stable — it requires and builds on 1.26.
+    env:
+      GOTOOLCHAIN: go1.26.0+auto
     cmds:
       - go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
