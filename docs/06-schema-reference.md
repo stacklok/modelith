@@ -248,7 +248,8 @@ is *not* here is as useful as knowing what is.
 - **Value objects.** There is no value-object type. Model a value-shaped concept
   as an owned entity or as attributes on its owner. The parking-garage example
   models `Ticket` this way and names the tension. First-class structured value
-  types are being explored
+  types were considered and set aside: named, typed fields define record
+  structure — an implementation detail this format abstracts away
   ([issue #11](https://github.com/stacklok/modelith/issues/11)).
 - **Domain events.** There is no event construct. A state change is expressed as
   an `action` plus the invariants it `preserves`, and enums **name** states
