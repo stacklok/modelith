@@ -91,6 +91,10 @@ func ER(m *model.Model) string {
 			if name != pair[0] {
 				card = model.InvertCardinality(card)
 			}
+			// Canonicalize so a relationship declared from both sides with
+			// semantically equal but differently written cardinalities
+			// ("1:n" and "0..n:1") dedupes to one edge.
+			card = model.CanonicalCardinality(card)
 			key := pair[0] + "\x00" + pair[1] + "\x00" + card + "\x00" + label
 			if seen[key] {
 				continue

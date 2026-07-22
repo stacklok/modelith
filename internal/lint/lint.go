@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -434,8 +435,11 @@ func runRelationshipShape(m *model.Model, res *Result) {
 		for i, rel := range m.Entities[name].Relationships {
 			path := fmt.Sprintf("/entities/%s/relationships/%d", name, i)
 
-			_, right, ok := model.ParseCardinality(rel.Cardinality)
-			if !ok {
+			// The schema pattern accepts an inverted range like "5..2"
+			// syntactically; flag only that semantic case here. Other parse
+			// failures (a malformed string, an absurd overflow) are the
+			// schema's to report, so this check doesn't double up on them.
+			if hasInvertedRange(rel.Cardinality) {
 				res.Findings = append(res.Findings, Finding{
 					Severity: SeverityError,
 					Category: CategorySemantic,
@@ -447,12 +451,14 @@ func runRelationshipShape(m *model.Model, res *Result) {
 				})
 			}
 
-			if rel.Symmetric {
+			// A symmetric marker is only meaningful when the two ends are
+			// interchangeable. Skip the check when the cardinality doesn't parse
+			// — the invalid cardinality is the finding to fix first, and the
+			// target side can't be judged.
+			_, right, ok := model.ParseCardinality(rel.Cardinality)
+			if rel.Symmetric && ok {
 				selfReferential := rel.Entity == name
-				// ok==false means the cardinality is already flagged above;
-				// don't pile on a second, confusing message about the target
-				// side of an unparseable value.
-				targetIsMany := ok && (right.Max < 0 || right.Max > 1)
+				targetIsMany := right.Max < 0 || right.Max > 1
 				if !selfReferential && !targetIsMany {
 					res.Findings = append(res.Findings, Finding{
 						Severity: SeverityError,
@@ -467,6 +473,27 @@ func runRelationshipShape(m *model.Model, res *Result) {
 			}
 		}
 	}
+}
+
+// hasInvertedRange reports whether either side of a cardinality is a range whose
+// minimum exceeds its maximum (e.g. "5..2"). This is the one semantic error the
+// schema's syntactic pattern cannot catch.
+func hasInvertedRange(card string) bool {
+	a, b, ok := strings.Cut(card, ":")
+	if !ok {
+		return false
+	}
+	return sideInverted(a) || sideInverted(b)
+}
+
+func sideInverted(s string) bool {
+	lo, hi, isRange := strings.Cut(s, "..")
+	if !isRange || hi == "n" {
+		return false
+	}
+	min, err1 := strconv.Atoi(lo)
+	max, err2 := strconv.Atoi(hi)
+	return err1 == nil && err2 == nil && min > max
 }
 
 // runReciprocity checks that a relationship declared from both sides agrees:
@@ -518,15 +545,15 @@ func runReciprocity(m *model.Model, res *Result) {
 		f, r := fwd[0], rev[0]
 		// Reciprocity is checked only for structurally valid cardinalities; an
 		// invalid one is already reported (by the schema, and by
-		// runRelationshipShape). The comparison is textual, so write both sides
-		// with matching shorthand ("1:n" / "n:1", not "1:n" / "0..n:1").
-		if _, _, ok := model.ParseCardinality(f.card); !ok {
+		// runRelationshipShape). Compare the parsed multiplicities, not the raw
+		// strings, so semantically equal declarations written differently
+		// ("1:n" one way, "0..n:1" the other) don't read as a conflict.
+		fL, fR, fok := model.ParseCardinality(f.card)
+		rL, rR, rok := model.ParseCardinality(r.card)
+		if !fok || !rok {
 			continue
 		}
-		if _, _, ok := model.ParseCardinality(r.card); !ok {
-			continue
-		}
-		if r.card != model.InvertCardinality(f.card) {
+		if fL != rR || fR != rL {
 			res.Findings = append(res.Findings, Finding{
 				Severity: SeverityError,
 				Category: CategorySemantic,

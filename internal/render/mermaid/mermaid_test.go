@@ -134,3 +134,16 @@ func TestADR_0003_BoundedCardinalityRendersNearestGlyph(t *testing.T) {
 		}
 	}
 }
+
+// TestERDedupesSemanticallyEqualInverses guards the review fix: a pair declared
+// from both sides with equal-but-differently-written cardinalities collapses to
+// one edge.
+func TestERDedupesSemanticallyEqualInverses(t *testing.T) {
+	m := &model.Model{Entities: map[string]model.Entity{
+		"A": {Definition: "a", Relationships: []model.Relationship{{Entity: "B", Cardinality: "1:n", Role: "owns"}}},
+		"B": {Definition: "b", Relationships: []model.Relationship{{Entity: "A", Cardinality: "0..n:1", Role: "owns"}}},
+	}}
+	if n := strings.Count(ER(m), `: "owns"`); n != 1 {
+		t.Errorf("expected semantically-equal inverse deduped to 1 edge, got %d:\n%s", n, ER(m))
+	}
+}
