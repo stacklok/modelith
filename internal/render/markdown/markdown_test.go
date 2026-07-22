@@ -63,6 +63,47 @@ func TestRenderInvariantsSection(t *testing.T) {
 	}
 }
 
+// TestRenderEntity_DerivedMarker checks that a derived entity shows a clear
+// "Derived" marker with its derivation when present, and a generic marker
+// when derivation is omitted (mirroring the derived-attribute rendering).
+func TestRenderEntity_DerivedMarker(t *testing.T) {
+	withDerivation := &model.Model{
+		Entities: map[string]model.Entity{
+			"Leaderboard": {
+				Definition: "A ranked view over current scores.",
+				Derived:    true,
+				Derivation: "Computed on demand from `Score` records.",
+			},
+		},
+	}
+	got := Render(withDerivation)
+	if !strings.Contains(got, "**Derived:** Computed on demand from `Score` records.\n\n") {
+		t.Fatalf("expected a derivation-specific marker, got:\n%s", got)
+	}
+
+	withoutDerivation := &model.Model{
+		Entities: map[string]model.Entity{
+			"Leaderboard": {
+				Definition: "A ranked view over current scores.",
+				Derived:    true,
+			},
+		},
+	}
+	got = Render(withoutDerivation)
+	if !strings.Contains(got, "**Derived.** Computed on demand from other state; never persisted.\n\n") {
+		t.Fatalf("expected a generic derived marker when derivation is omitted, got:\n%s", got)
+	}
+
+	notDerived := &model.Model{
+		Entities: map[string]model.Entity{
+			"Leaderboard": {Definition: "A ranked view over current scores."},
+		},
+	}
+	if strings.Contains(Render(notDerived), "**Derived") {
+		t.Fatalf("did not expect a derived marker on a non-derived entity:\n%s", Render(notDerived))
+	}
+}
+
 // TestGoldenExample renders the committed example and compares it to the
 // checked-in Markdown. This is the same invariant `modelith render --check` enforces
 // in CI: if you change the renderer or the example YAML, regenerate the .md.

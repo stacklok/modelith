@@ -97,6 +97,19 @@ Each key under `entities` is the entity's canonical name (PascalCase, e.g.
 | `attributes` | list | no | See [Attribute](#attribute). |
 | `actions` | list | no | Mutations the system exposes. See [Action](#action). |
 | `invariants` | list | no | Rules that must always hold. See [Invariant](#invariant). |
+| `derived` | boolean | no | True if the entity is wholly computed from other state rather than persisted — never stored, recomputed on demand. |
+| `derivation` | string | no | How a derived entity is computed. Unlike an attribute's `derivation`, this is optional even when `derived` is true — the `definition` often already explains it. |
+
+Mark an entity `derived` when it has no persisted identity of its own — a
+computed report, a query result, a set of findings recomputed on every read.
+That distinction is easy to lose once the entity has relationships and
+attributes like any other, and the rendered diagram would otherwise draw it
+exactly like a stored one. The linter warns if a `derived` entity is the
+target of an `ownership: owned` relationship — composing an ephemeral thing is
+usually a modeling error. The Mermaid ER diagram does not visually distinguish
+derived entities — per-entity styling is unverified across the Mermaid
+versions in play, so the ER stays a deliberately lossy view; the Markdown text
+is the source of truth.
 
 ## Relationship
 

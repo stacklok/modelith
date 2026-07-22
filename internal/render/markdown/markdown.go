@@ -117,6 +117,15 @@ func renderEntities(b *strings.Builder, m *model.Model) {
 			b.WriteString("\n\n")
 		}
 
+		if ent.Derived {
+			d := "**Derived.** Computed on demand from other state; never persisted."
+			if derivation := strings.TrimSpace(ent.Derivation); derivation != "" {
+				d = fmt.Sprintf("**Derived:** %s", derivation)
+			}
+			b.WriteString(d)
+			b.WriteString("\n\n")
+		}
+
 		if len(ent.Relationships) > 0 {
 			b.WriteString("**Relationships**\n\n")
 			for _, rel := range ent.Relationships {

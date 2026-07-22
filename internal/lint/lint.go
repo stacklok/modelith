@@ -291,6 +291,13 @@ func runSemantic(m *model.Model, res *Result) {
 					Path:     fmt.Sprintf("/entities/%s/relationships/%d/entity", name, i),
 					Message:  fmt.Sprintf("relationship targets undefined entity %q", rel.Entity),
 				})
+			} else if rel.Ownership == "owned" && m.Entities[rel.Entity].Derived {
+				res.Findings = append(res.Findings, Finding{
+					Severity: SeverityWarning,
+					Category: CategorySemantic,
+					Path:     fmt.Sprintf("/entities/%s/relationships/%d/ownership", name, i),
+					Message:  fmt.Sprintf("entity %q owns %q, which is derived — composing an ephemeral, never-persisted entity is usually a modeling error", name, rel.Entity),
+				})
 			}
 			// A role names a non-entity vocabulary term; it should resolve to an
 			// entity or a glossary term (the DDD-1 payoff — undefined roles).
@@ -357,6 +364,7 @@ func runSemantic(m *model.Model, res *Result) {
 	for _, name := range m.EntityNames() {
 		ent := m.Entities[name]
 		checkRefs(fmt.Sprintf("/entities/%s/definition", name), ent.Definition)
+		checkRefs(fmt.Sprintf("/entities/%s/derivation", name), ent.Derivation)
 		for i, rel := range ent.Relationships {
 			checkRefs(fmt.Sprintf("/entities/%s/relationships/%d/role", name, i), rel.Role)
 			checkRefs(fmt.Sprintf("/entities/%s/relationships/%d/note", name, i), rel.Note)
@@ -632,6 +640,7 @@ func runCompleteness(m *model.Model, res *Result) {
 	}
 	for _, ent := range m.Entities {
 		scan(ent.Definition)
+		scan(ent.Derivation)
 		for _, rel := range ent.Relationships {
 			scan(rel.Role)
 			scan(rel.Note)
