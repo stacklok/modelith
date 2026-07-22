@@ -30,6 +30,25 @@ few hundred lines, goes through this loop:
 5. If the cap is hit with real issues still open, say so plainly in the final
    round's record. Never quietly declare the change done.
 
+## Draft until vetted
+
+When a change flows through a pull request, open it as a draft as soon as the
+branch is first pushed, and keep it a draft while the review loop runs (its
+round records go to PR comments, per step 4 above). Flip it to ready with
+`gh pr ready` as soon as the review loop has cleared it with no blocking
+findings. A ready pull request means the review loop vetted it; a draft means
+the loop is still in progress.
+
+Do not wait for CI before flipping, and do not poll for CI to finish. `main` is
+branch-protected: the required checks (`build-test` and the DCO `check`) must be
+green before a merge lands, so a ready pull request cannot merge on a red build.
+Flipping to ready right after the review loop clears is enough — branch
+protection holds the merge until CI passes.
+
+A phase orchestrator applies this itself. It returns the pull request after
+flipping it to ready. If it stopped with blockers still open, it leaves the
+draft open and says so plainly.
+
 ## Scale round one to the change
 
 The full fan-out is not the default. Match the first round's depth to what the
