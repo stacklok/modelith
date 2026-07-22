@@ -1,3 +1,7 @@
+---
+Status: superseded by ADR-0007
+---
+
 # Value types for structured non-entity values
 
 Add a top-level `types:` section for named value types: structured values with
