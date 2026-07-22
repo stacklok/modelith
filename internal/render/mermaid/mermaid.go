@@ -11,14 +11,51 @@ import (
 	"github.com/stacklok/modelith/internal/model"
 )
 
-// cardinalityNotation maps our "a:b" cardinality strings to Mermaid erDiagram
-// crow's-foot notation. The left side is the entity declaring the
-// relationship; the right side is the target.
-var cardinalityNotation = map[string]string{
-	"1:1": "||--||",
-	"1:n": "||--o{",
-	"n:1": "}o--||",
-	"n:n": "}o--o{",
+// erMarkers renders a cardinality as Mermaid erDiagram crow's-foot notation,
+// using the nearest glyph the notation can express. Mermaid has no numeric
+// bound, so an exact or bounded count (e.g. "1:2") renders as one-or-many; the
+// precise count lives in the Markdown table and role instead (see ADR-0002).
+// An unparseable cardinality falls back to many-to-many, matching the schema's
+// pre-validation expectation that it is already a structural error.
+func erMarkers(card string) string {
+	left, right, ok := model.ParseCardinality(card)
+	if !ok {
+		return "}o--o{"
+	}
+	return leftMarker(left) + "--" + rightMarker(right)
+}
+
+// minChar is the innermost glyph (nearest the relationship line): "o" for a
+// minimum of zero, "|" for one or more.
+func minChar(m model.Multiplicity) string {
+	if m.Min == 0 {
+		return "o"
+	}
+	return "|"
+}
+
+// isMany reports whether the maximum is more than one (or unbounded), which the
+// crow's-foot ("{" / "}") represents.
+func isMany(m model.Multiplicity) bool {
+	return m.Max < 0 || m.Max > 1
+}
+
+// leftMarker is the declaring entity's marker: outer (max) glyph then inner
+// (min) glyph.
+func leftMarker(m model.Multiplicity) string {
+	if isMany(m) {
+		return "}" + minChar(m)
+	}
+	return "|" + minChar(m)
+}
+
+// rightMarker is the target entity's marker: inner (min) glyph then outer (max)
+// glyph.
+func rightMarker(m model.Multiplicity) string {
+	if isMany(m) {
+		return minChar(m) + "{"
+	}
+	return minChar(m) + "|"
 }
 
 // ER renders the model as a Mermaid erDiagram. Attributes are intentionally
@@ -37,10 +74,7 @@ func ER(m *model.Model) string {
 	seen := map[string]bool{}
 	for _, name := range m.EntityNames() {
 		for _, rel := range m.Entities[name].Relationships {
-			notation, ok := cardinalityNotation[rel.Cardinality]
-			if !ok {
-				notation = "}o--o{"
-			}
+			notation := erMarkers(rel.Cardinality)
 			label := relationshipLabel(rel)
 
 			// Dedupe edges declared from both sides of the same pair. The key

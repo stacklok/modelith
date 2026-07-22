@@ -121,6 +121,9 @@ func renderEntities(b *strings.Builder, m *model.Model) {
 			b.WriteString("**Relationships**\n\n")
 			for _, rel := range ent.Relationships {
 				parts := []string{fmt.Sprintf("`%s`", rel.Entity), rel.Cardinality}
+				if rel.Symmetric {
+					parts = append(parts, "symmetric")
+				}
 				if rel.Ownership != "" {
 					parts = append(parts, rel.Ownership)
 				}

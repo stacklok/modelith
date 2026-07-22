@@ -726,3 +726,82 @@ scenarios:
 		t.Fatalf("mixed bare/structured actions should be valid, got: %+v", res.Findings)
 	}
 }
+
+// TestADR_0003_SymmetricRequiresInterchangeableEnds pins the symmetric-marker
+// rule from ADR-0003: symmetric is only meaningful on a self-referential
+// relationship or one whose target side is more than one.
+func TestADR_0003_SymmetricRequiresInterchangeableEnds(t *testing.T) {
+	// Valid: symmetric self-referential; symmetric on an exact pair.
+	valid := `
+kind: DomainModel
+version: v1
+entities:
+  Node:
+    definition: A node that peers with other nodes.
+    relationships:
+      - entity: Node
+        cardinality: "n:n"
+        symmetric: true
+        role: peers with
+  Pair:
+    definition: An unordered pair of nodes.
+    relationships:
+      - entity: Node
+        cardinality: "1:2"
+        symmetric: true
+        role: the unordered pair
+`
+	res, err := Run([]byte(valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findingWithMessage(res.Findings, "must be self-referential") {
+		t.Fatalf("valid symmetric relationships should not be flagged: %+v", res.Findings)
+	}
+
+	// Invalid: symmetric on a directed 1:1 to a different entity.
+	invalid := `
+kind: DomainModel
+version: v1
+entities:
+  Passport:
+    definition: A passport held by exactly one person.
+    relationships:
+      - entity: Person
+        cardinality: "1:1"
+        symmetric: true
+  Person:
+    definition: A person.
+`
+	res, err = Run([]byte(invalid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !findingWithMessage(res.Findings, "must be self-referential") {
+		t.Fatalf("expected a symmetric-misuse error, got: %+v", res.Findings)
+	}
+}
+
+// TestADR_0003_InvalidCardinalityRange pins that an inverted range like "5..2",
+// which the schema pattern accepts, is caught as a semantic error.
+func TestADR_0003_InvalidCardinalityRange(t *testing.T) {
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  A:
+    definition: An entity with a broken cardinality range.
+    relationships:
+      - entity: B
+        cardinality: "1:5..2"
+  B:
+    definition: Another entity.
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !findingWithMessage(res.Findings, "minimum must not exceed its maximum") {
+		t.Fatalf("expected an invalid-range error, got: %+v", res.Findings)
+	}
+}

@@ -103,6 +103,7 @@ func Run(data []byte) (*Result, error) {
 	}
 
 	runSemantic(m, res)
+	runRelationshipShape(m, res)
 	runReciprocity(m, res)
 	runCompleteness(m, res)
 
@@ -422,9 +423,51 @@ func runSemantic(m *model.Model, res *Result) {
 	}
 }
 
-// knownCardinalities is the set the schema permits. Reciprocity is only checked
-// for recognized values; an unrecognized one is already a structural error.
-var knownCardinalities = map[string]bool{"1:1": true, "1:n": true, "n:1": true, "n:n": true}
+// runRelationshipShape checks each relationship's cardinality and symmetric
+// marker beyond what the schema pattern can express. The schema pattern accepts
+// an inverted range like "5..2"; here it becomes a semantic error. A symmetric
+// marker is only meaningful when the two ends are interchangeable, so it is
+// restricted to a self-referential relationship or one whose target side is
+// more than one.
+func runRelationshipShape(m *model.Model, res *Result) {
+	for _, name := range m.EntityNames() {
+		for i, rel := range m.Entities[name].Relationships {
+			path := fmt.Sprintf("/entities/%s/relationships/%d", name, i)
+
+			_, right, ok := model.ParseCardinality(rel.Cardinality)
+			if !ok {
+				res.Findings = append(res.Findings, Finding{
+					Severity: SeverityError,
+					Category: CategorySemantic,
+					Path:     path + "/cardinality",
+					Message: fmt.Sprintf(
+						"invalid cardinality %q: a range's minimum must not exceed its maximum",
+						rel.Cardinality,
+					),
+				})
+			}
+
+			if rel.Symmetric {
+				selfReferential := rel.Entity == name
+				// ok==false means the cardinality is already flagged above;
+				// don't pile on a second, confusing message about the target
+				// side of an unparseable value.
+				targetIsMany := ok && (right.Max < 0 || right.Max > 1)
+				if !selfReferential && !targetIsMany {
+					res.Findings = append(res.Findings, Finding{
+						Severity: SeverityError,
+						Category: CategorySemantic,
+						Path:     path + "/symmetric",
+						Message: fmt.Sprintf(
+							"symmetric relationship %s→%s must be self-referential or have a target side greater than one",
+							name, rel.Entity,
+						),
+					})
+				}
+			}
+		}
+	}
+}
 
 // runReciprocity checks that a relationship declared from both sides agrees:
 // B→A must declare the inverse of A→B's cardinality. A contradiction (e.g. A
@@ -473,7 +516,14 @@ func runReciprocity(m *model.Model, res *Result) {
 			continue
 		}
 		f, r := fwd[0], rev[0]
-		if !knownCardinalities[f.card] || !knownCardinalities[r.card] {
+		// Reciprocity is checked only for structurally valid cardinalities; an
+		// invalid one is already reported (by the schema, and by
+		// runRelationshipShape). The comparison is textual, so write both sides
+		// with matching shorthand ("1:n" / "n:1", not "1:n" / "0..n:1").
+		if _, _, ok := model.ParseCardinality(f.card); !ok {
+			continue
+		}
+		if _, _, ok := model.ParseCardinality(r.card); !ok {
 			continue
 		}
 		if r.card != model.InvertCardinality(f.card) {

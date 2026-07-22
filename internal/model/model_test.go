@@ -104,3 +104,61 @@ func TestEntityNamesNilReceiver(t *testing.T) {
 		t.Fatalf("EntityNames on nil *Model should return nil, got %v", got)
 	}
 }
+
+func TestInvertCardinality(t *testing.T) {
+	cases := map[string]string{
+		"1:1":    "1:1",
+		"n:n":    "n:n",
+		"1:n":    "n:1",
+		"n:1":    "1:n",
+		"1:2":    "2:1",
+		"0..1:n": "n:0..1",
+		"weird":  "weird", // no ":" — returned unchanged
+	}
+	for in, want := range cases {
+		if got := InvertCardinality(in); got != want {
+			t.Errorf("InvertCardinality(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseMultiplicity(t *testing.T) {
+	cases := []struct {
+		in       string
+		min, max int
+		ok       bool
+	}{
+		{"1", 1, 1, true},
+		{"n", 0, -1, true},
+		{"2", 2, 2, true},
+		{"0..1", 0, 1, true},
+		{"1..n", 1, -1, true},
+		{"0..5", 0, 5, true},
+		{"5..2", 0, 0, false}, // inverted range
+		{"", 0, 0, false},
+		{"x", 0, 0, false},
+		{"1..x", 0, 0, false},
+	}
+	for _, c := range cases {
+		got, ok := ParseMultiplicity(c.in)
+		if ok != c.ok {
+			t.Errorf("ParseMultiplicity(%q) ok = %v, want %v", c.in, ok, c.ok)
+			continue
+		}
+		if ok && (got.Min != c.min || got.Max != c.max) {
+			t.Errorf("ParseMultiplicity(%q) = {%d,%d}, want {%d,%d}", c.in, got.Min, got.Max, c.min, c.max)
+		}
+	}
+}
+
+func TestParseCardinality(t *testing.T) {
+	if _, _, ok := ParseCardinality("1:2"); !ok {
+		t.Error("ParseCardinality(1:2) should be ok")
+	}
+	if _, _, ok := ParseCardinality("nocolon"); ok {
+		t.Error("ParseCardinality(nocolon) should not be ok")
+	}
+	if _, _, ok := ParseCardinality("1:5..2"); ok {
+		t.Error("ParseCardinality with an inverted range should not be ok")
+	}
+}

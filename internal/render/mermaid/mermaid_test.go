@@ -112,3 +112,25 @@ func TestERLabelFallsBackToOwnershipThenCardinality(t *testing.T) {
 		t.Errorf("expected cardinality label when role and ownership are absent; got:\n%s", out)
 	}
 }
+
+// TestADR_0003_BoundedCardinalityRendersNearestGlyph pins the render half of
+// ADR-0003 and the capture-first principle in ADR-0002: Mermaid has no numeric
+// bound, so exact and bounded counts render as the nearest crow's-foot glyph
+// (the precise count lives in the Markdown, not the diagram).
+func TestADR_0003_BoundedCardinalityRendersNearestGlyph(t *testing.T) {
+	cases := map[string]string{
+		"1:2":    "||--|{", // exactly two -> one-or-many
+		"1:1..n": "||--|{", // at least one -> one-or-many
+		"1:0..1": "||--o|", // optional -> zero-or-one
+		"2:1":    "}|--||", // exact on the left side (crow's-foot mirror)
+	}
+	for card, want := range cases {
+		m := &model.Model{Entities: map[string]model.Entity{
+			"A": {Definition: "a", Relationships: []model.Relationship{{Entity: "B", Cardinality: card}}},
+			"B": {Definition: "b"},
+		}}
+		if out := ER(m); !strings.Contains(out, want) {
+			t.Errorf("cardinality %q: expected notation %q in:\n%s", card, want, out)
+		}
+	}
+}
