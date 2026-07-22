@@ -52,6 +52,12 @@ type Entity struct {
 	Attributes    []Attribute    `json:"attributes,omitempty"`
 	Actions       []Action       `json:"actions,omitempty"`
 	Invariants    []Invariant    `json:"invariants,omitempty"`
+	// Derived marks an entity as wholly computed from other state rather than
+	// persisted — never stored, recomputed on demand. Unlike a derived
+	// attribute, Derivation is optional even when Derived is true: the
+	// Definition often already explains how.
+	Derived    bool   `json:"derived,omitempty"`
+	Derivation string `json:"derivation,omitempty"`
 }
 
 // Relationship describes how an entity relates to another.

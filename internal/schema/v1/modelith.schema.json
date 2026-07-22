@@ -136,7 +136,25 @@
           "items": {
             "$ref": "#/$defs/invariant"
           }
+        },
+        "derived": {
+          "description": "True if this entity is wholly computed from other state rather than persisted — never stored, recomputed on demand. Distinct from an owned relationship: composing a derived entity is usually a modeling error (the linter warns).",
+          "type": "boolean"
+        },
+        "derivation": {
+          "description": "How a derived entity is computed. Optional even when derived is true, since the definition often already explains it.",
+          "type": "string",
+          "minLength": 1
         }
+      },
+      "if": {
+        "properties": { "derived": { "const": true } },
+        "required": ["derived"]
+      },
+      "then": {},
+      "else": {
+        "$comment": "derivation is only allowed when derived: true",
+        "properties": { "derivation": false }
       }
     },
     "relationship": {

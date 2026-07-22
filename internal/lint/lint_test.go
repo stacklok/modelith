@@ -696,6 +696,112 @@ entities:
 	}
 }
 
+func TestEntityDerived_DerivationOptional(t *testing.T) {
+	// Unlike the attribute feature, an entity's derivation is optional even
+	// when derived is true — the definition often already explains it.
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  Report:
+    definition: A computed summary. No derivation string given.
+    derived: true
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countBy(res.Findings, SeverityError, CategoryStructural) != 0 {
+		t.Fatalf("expected derived entity without derivation to lint clean structurally, got: %+v", res.Findings)
+	}
+}
+
+func TestEntityDerivationWithoutDerivedIsRejected(t *testing.T) {
+	// An orphaned entity `derivation` without `derived: true` is a structural
+	// error (schema if/then/else), mirroring the attribute rule.
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  Report:
+    definition: A computed summary.
+    derivation: "Computed from other state."
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countBy(res.Findings, SeverityError, CategoryStructural) == 0 {
+		t.Fatalf("expected a structural error: entity derivation without derived, got: %+v", res.Findings)
+	}
+}
+
+func TestDerivedEntity_OwnedTargetWarning(t *testing.T) {
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  Scene:
+    definition: A resolved editable canvas.
+    relationships:
+      - entity: Diagnostic
+        cardinality: "1:n"
+        ownership: owned
+  Diagnostic:
+    definition: A finding computed from resolved scene geometry.
+    derived: true
+    derivation: Recomputed on every query from the resolved geometry.
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Finding{
+		Severity: SeverityWarning,
+		Category: CategorySemantic,
+		Path:     "/entities/Scene/relationships/0/ownership",
+		Message:  `entity "Scene" owns "Diagnostic", which is derived — composing an ephemeral, never-persisted entity is usually a modeling error`,
+	}
+	found := false
+	for _, f := range res.Findings {
+		if f == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected finding %+v, got: %+v", want, res.Findings)
+	}
+	if res.HasBlocking(false) {
+		t.Fatal("a lone derived-ownership warning should not block")
+	}
+}
+
+func TestDerivedEntity_ReferencedTargetIsClean(t *testing.T) {
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  Scene:
+    definition: A resolved editable canvas.
+    relationships:
+      - entity: Diagnostic
+        cardinality: "1:n"
+        ownership: referenced
+  Diagnostic:
+    definition: A finding computed from resolved scene geometry.
+    derived: true
+    derivation: Recomputed on every query from the resolved geometry.
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findingWithMessage(res.Findings, "which is derived") {
+		t.Fatalf("did not expect a derived-ownership warning for a referenced relationship, got: %+v", res.Findings)
+	}
+}
+
 func TestBareAndStructuredActionsCoexist(t *testing.T) {
 	src := `
 kind: DomainModel
