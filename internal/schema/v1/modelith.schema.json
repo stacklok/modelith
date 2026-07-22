@@ -109,6 +109,11 @@
           "type": "string",
           "minLength": 1
         },
+        "subtypeOf": {
+          "description": "Names the entity this one is a kind of — an is-a / generalization link. Must reference a defined entity. The parent's invariants are understood to hold for this entity too.",
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]+$"
+        },
         "relationships": {
           "description": "How this entity relates to others. A relationship is declared under one entity and names a target; it may be declared from either end (the linter checks that the two views agree). When one entity is intuitively the parent — it owns or contains the other, or is the \"one\" side of a one-to-many — prefer declaring the relationship there.",
           "type": "array",

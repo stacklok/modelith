@@ -93,6 +93,7 @@ Each key under `entities` is the entity's canonical name (PascalCase, e.g.
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `definition` | string | yes | Two to four sentences: what it is, what it is not. |
+| `subtypeOf` | string | no | Names the entity this one is a kind of (an is-a link). Must reference a defined entity. |
 | `relationships` | list | no | See [Relationship](#relationship). |
 | `attributes` | list | no | See [Attribute](#attribute). |
 | `actions` | list | no | Mutations the system exposes. See [Action](#action). |
@@ -110,6 +111,16 @@ usually a modeling error. The Mermaid ER diagram does not visually distinguish
 derived entities — per-entity styling is unverified across the Mermaid
 versions in play, so the ER stays a deliberately lossy view; the Markdown text
 is the source of truth.
+
+Use `subtypeOf` for generalization — when one entity *is a kind of* another
+(a `Card` is a `PaymentMethod`). The child declares it, and it must name a
+defined entity; the linter errors on an undefined parent or a cycle. A parent's
+invariants are understood to cover its subtypes, so a subtype that adds no rule
+of its own is not flagged for having no invariants. The Mermaid ER diagram does
+not draw the is-a link — erDiagram has no generalization notation, so the
+hierarchy lives in the rendered Markdown (each child names its supertype and
+each parent lists its subtypes), a deliberately lossy ER per the same principle
+as derived entities.
 
 ## Relationship
 

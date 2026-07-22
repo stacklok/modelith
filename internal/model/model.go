@@ -49,7 +49,10 @@ type EnumValue struct {
 
 // Entity is a named concept in the domain.
 type Entity struct {
-	Definition    string         `json:"definition"`
+	Definition string `json:"definition"`
+	// SubtypeOf names the entity this one is a kind of (an is-a link). The
+	// parent's invariants are understood to cover this entity too.
+	SubtypeOf     string         `json:"subtypeOf,omitempty"`
 	Relationships []Relationship `json:"relationships,omitempty"`
 	Attributes    []Attribute    `json:"attributes,omitempty"`
 	Actions       []Action       `json:"actions,omitempty"`
