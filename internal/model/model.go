@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -58,9 +60,12 @@ type Entity struct {
 type Relationship struct {
 	Entity      string `json:"entity"`
 	Cardinality string `json:"cardinality"`
-	Role        string `json:"role,omitempty"`
-	Ownership   string `json:"ownership,omitempty"`
-	Note        string `json:"note,omitempty"`
+	// Symmetric marks a relationship as carrying no inherent order, so (a, b)
+	// is the same as (b, a) — an unordered pair, peering, or adjacency.
+	Symmetric bool   `json:"symmetric,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Ownership string `json:"ownership,omitempty"`
+	Note      string `json:"note,omitempty"`
 }
 
 // Attribute is a key property of an entity.
@@ -139,19 +144,64 @@ func Parse(data []byte) (*Model, error) {
 }
 
 // InvertCardinality returns the cardinality as seen from the other side of the
-// relationship: "1:n" becomes "n:1" and vice versa, while "1:1" and "n:n" are
-// symmetric. Unrecognized values are returned unchanged. This lets the renderer
-// dedupe a relationship declared from both sides and lets the linter check that
-// reciprocal declarations agree.
+// relationship by swapping the two sides: "1:n" becomes "n:1", "1:2" becomes
+// "2:1", while "1:1" and "n:n" are unchanged. A value with no ":" is returned
+// unchanged. This lets the renderer dedupe a relationship declared from both
+// sides and lets the linter check that reciprocal declarations agree.
 func InvertCardinality(c string) string {
-	switch c {
-	case "1:n":
-		return "n:1"
-	case "n:1":
-		return "1:n"
-	default:
+	left, right, ok := strings.Cut(c, ":")
+	if !ok {
 		return c
 	}
+	return right + ":" + left
+}
+
+// Multiplicity is one side of a relationship cardinality parsed into a numeric
+// range. Max is -1 when unbounded ("many").
+type Multiplicity struct {
+	Min int
+	Max int // -1 == unbounded
+}
+
+// ParseMultiplicity parses one side of a cardinality string: "1", "n", an exact
+// count like "2", or a range like "0..1", "1..n", "0..5". ok is false for a
+// malformed side or an inverted range (min greater than max).
+func ParseMultiplicity(s string) (Multiplicity, bool) {
+	if s == "n" {
+		return Multiplicity{Min: 0, Max: -1}, true
+	}
+	lo, hi, isRange := strings.Cut(s, "..")
+	if !isRange {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			return Multiplicity{}, false
+		}
+		return Multiplicity{Min: n, Max: n}, true
+	}
+	min, err := strconv.Atoi(lo)
+	if err != nil || min < 0 {
+		return Multiplicity{}, false
+	}
+	if hi == "n" {
+		return Multiplicity{Min: min, Max: -1}, true
+	}
+	max, err := strconv.Atoi(hi)
+	if err != nil || max < min {
+		return Multiplicity{}, false
+	}
+	return Multiplicity{Min: min, Max: max}, true
+}
+
+// ParseCardinality splits an "left:right" cardinality and parses both sides. ok
+// is false if the string has no ":" or either side is malformed.
+func ParseCardinality(c string) (left, right Multiplicity, ok bool) {
+	a, b, found := strings.Cut(c, ":")
+	if !found {
+		return Multiplicity{}, Multiplicity{}, false
+	}
+	l, lok := ParseMultiplicity(a)
+	r, rok := ParseMultiplicity(b)
+	return l, r, lok && rok
 }
 
 // EntityNames returns the entity keys in a stable (alphabetical) order so that

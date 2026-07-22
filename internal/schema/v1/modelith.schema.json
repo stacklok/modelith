@@ -151,9 +151,13 @@
           "pattern": "^[A-Z][A-Za-z0-9]+$"
         },
         "cardinality": {
-          "description": "Relationship cardinality.",
+          "description": "Relationship cardinality, written \"left:right\". Each side is a multiplicity: \"1\" (exactly one), \"n\" (zero or more), an exact count like \"2\", or a range like \"0..1\", \"1..n\", \"0..5\". \"1:1\", \"1:n\", \"n:1\", and \"n:n\" are the common shorthands. Example: \"1:2\" is exactly two; \"1:1..n\" is at least one.",
           "type": "string",
-          "enum": ["1:1", "1:n", "n:1", "n:n"]
+          "pattern": "^(n|[0-9]+(\\.\\.(n|[0-9]+))?):(n|[0-9]+(\\.\\.(n|[0-9]+))?)$"
+        },
+        "symmetric": {
+          "description": "True if the relationship carries no inherent order: (a, b) is the same as (b, a). Valid on a self-referential relationship or one whose target side is more than one (e.g. an unordered pair, peering, adjacency). Combined with an exact count like \"1:2\", declares an unordered pair.",
+          "type": "boolean"
         },
         "role": {
           "description": "What role the related entity plays (freeform; backtick entity names). A role name like `Owner` should be defined in the glossary.",

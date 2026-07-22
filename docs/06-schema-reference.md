@@ -103,15 +103,24 @@ Each key under `entities` is the entity's canonical name (PascalCase, e.g.
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `entity` | string | yes | Target entity name. Must reference a defined entity. |
-| `cardinality` | enum | yes | One of `1:1`, `1:n`, `n:1`, `n:n`. |
+| `cardinality` | string | yes | Written `left:right` (see below). `1:1`, `1:n`, `n:1`, `n:n` are the common shorthands. |
+| `symmetric` | boolean | no | The relationship carries no inherent order: `(a, b)` is the same as `(b, a)`. Only valid on a self-referential relationship or one whose target side is more than one. |
 | `role` | string | no | The role the related entity plays. Backtick entity names. |
 | `ownership` | enum | no | Is the related entity *part of* this one? `owned` = it can't exist independently (composition: created within, and deleted with, this entity); `referenced` = an independent entity this one points at. Omitted ⇒ `referenced`. |
 | `note` | string | no | Freeform note. |
 
+**Cardinality grammar.** Each side is a multiplicity: `1` (exactly one), `n`
+(zero or more), an exact count like `2`, or a range like `0..1`, `1..n`, `0..5`.
+So `1:2` is exactly two, `1:0..1` is optional, and `1:1..n` is at least one. The
+rendered Mermaid diagram has no numeric cardinality, so an exact or bounded
+count draws as the nearest crow's-foot (one-or-many for `1:2`); the precise
+count stays in this table and the `role`. Combine `symmetric: true` with an
+exact count — `1:2 symmetric` — to declare an unordered pair.
+
 You can declare a relationship from one side or both. If you declare it from
 both — `Project` lists `Policy` *and* `Policy` lists `Project` — the
 cardinalities must be inverses (`1:n` one way ⇒ `n:1` the other; `1:1` and `n:n`
-are symmetric). The linter errors on a contradiction, and the renderer collapses
+invert to themselves). The linter errors on a contradiction, and the renderer collapses
 a matching pair into a single edge. Declaring it once is fine; the renderer
 shows the edge either way.
 
