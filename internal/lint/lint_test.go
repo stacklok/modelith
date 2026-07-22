@@ -805,3 +805,62 @@ entities:
 		t.Fatalf("expected an invalid-range error, got: %+v", res.Findings)
 	}
 }
+
+// TestReciprocitySemanticEquality guards the review fix: "1:n" and "0..n:1" are
+// the same relationship inverted (n == 0..n), so declaring both sides that way
+// must NOT read as a conflict.
+func TestReciprocitySemanticEquality(t *testing.T) {
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  Alpha:
+    definition: Owns many betas.
+    relationships:
+      - entity: Beta
+        cardinality: "1:n"
+        role: owns
+  Beta:
+    definition: Belongs to one alpha.
+    relationships:
+      - entity: Alpha
+        cardinality: "0..n:1"
+        role: owns
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findingWithMessage(res.Findings, "reciprocal cardinality conflict") {
+		t.Fatalf("semantically equal inverses should not conflict: %+v", res.Findings)
+	}
+}
+
+// TestSymmetricOnInvalidRangeNoDoubleError guards the review fix: an inverted
+// range with symmetric: true reports the range error only, not a second
+// confusing symmetric-misuse error.
+func TestSymmetricOnInvalidRangeNoDoubleError(t *testing.T) {
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  A:
+    definition: Broken range, symmetric set.
+    relationships:
+      - entity: B
+        cardinality: "1:5..2"
+        symmetric: true
+  B:
+    definition: Another.
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !findingWithMessage(res.Findings, "minimum must not exceed its maximum") {
+		t.Fatalf("expected the range error: %+v", res.Findings)
+	}
+	if findingWithMessage(res.Findings, "must be self-referential") {
+		t.Fatalf("should not also emit the symmetric-misuse error: %+v", res.Findings)
+	}
+}

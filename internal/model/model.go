@@ -204,6 +204,24 @@ func ParseCardinality(c string) (left, right Multiplicity, ok bool) {
 	return l, r, lok && rok
 }
 
+// canonical is a normal-form string for one multiplicity, so semantically equal
+// sides written differently ("n" and "0..n") compare equal.
+func (m Multiplicity) canonical() string {
+	return strconv.Itoa(m.Min) + ".." + strconv.Itoa(m.Max)
+}
+
+// CanonicalCardinality returns a normal form in which semantically equal
+// cardinalities written differently ("1:n" and "1:0..n") are the same string.
+// An unparseable value is returned unchanged so it still compares by its raw
+// text.
+func CanonicalCardinality(c string) string {
+	l, r, ok := ParseCardinality(c)
+	if !ok {
+		return c
+	}
+	return l.canonical() + ":" + r.canonical()
+}
+
 // EntityNames returns the entity keys in a stable (alphabetical) order so that
 // rendering is deterministic regardless of map iteration order.
 func (m *Model) EntityNames() []string {
