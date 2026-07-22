@@ -107,6 +107,14 @@ func renderEntities(b *strings.Builder, m *model.Model) {
 	if len(names) == 0 {
 		return
 	}
+	// Index subtypes by parent so each parent can list its kinds. names is
+	// sorted, so each child list is deterministic.
+	subtypes := map[string][]string{}
+	for _, n := range names {
+		if p := m.Entities[n].SubtypeOf; p != "" {
+			subtypes[p] = append(subtypes[p], n)
+		}
+	}
 	b.WriteString("## Entities\n\n")
 	for _, name := range names {
 		ent := m.Entities[name]
@@ -115,6 +123,17 @@ func renderEntities(b *strings.Builder, m *model.Model) {
 		if def := strings.TrimSpace(ent.Definition); def != "" {
 			b.WriteString(def)
 			b.WriteString("\n\n")
+		}
+
+		if ent.SubtypeOf != "" {
+			fmt.Fprintf(b, "**Subtype of** `%s`\n\n", ent.SubtypeOf)
+		}
+		if kids := subtypes[name]; len(kids) > 0 {
+			quoted := make([]string, len(kids))
+			for i, k := range kids {
+				quoted[i] = "`" + k + "`"
+			}
+			fmt.Fprintf(b, "**Subtypes** — %s\n\n", strings.Join(quoted, ", "))
 		}
 
 		if ent.Derived {

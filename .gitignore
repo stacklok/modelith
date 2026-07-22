@@ -18,3 +18,6 @@
 # Local-only running-state file (current state, decisions in flight, next
 # steps). Never committed; see CLAUDE.md.
 /HANDOFF.md
+
+# Agent worktrees (created by subagent isolation; never commit)
+/.claude/worktrees/

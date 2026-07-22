@@ -105,6 +105,7 @@ func Run(data []byte) (*Result, error) {
 
 	runSemantic(m, res)
 	runRelationshipShape(m, res)
+	runSubtypes(m, res)
 	runReciprocity(m, res)
 	runCompleteness(m, res)
 
@@ -504,6 +505,73 @@ func sideInverted(s string) bool {
 	return err1 == nil && err2 == nil && min > max
 }
 
+// runSubtypes validates the is-a links: a subtypeOf must name a defined entity,
+// and the chain of subtypeOf links must not cycle (an entity cannot be a kind
+// of itself, directly or transitively).
+func runSubtypes(m *model.Model, res *Result) {
+	for _, name := range m.EntityNames() {
+		parent := m.Entities[name].SubtypeOf
+		if parent == "" {
+			continue
+		}
+		if _, ok := m.Entities[parent]; !ok {
+			res.Findings = append(res.Findings, Finding{
+				Severity: SeverityError,
+				Category: CategorySemantic,
+				Path:     fmt.Sprintf("/entities/%s/subtypeOf", name),
+				Message:  fmt.Sprintf("entity %q is a subtype of undefined entity %q", name, parent),
+			})
+			continue
+		}
+		if subtypeChainCycles(m, name) {
+			res.Findings = append(res.Findings, Finding{
+				Severity: SeverityError,
+				Category: CategorySemantic,
+				Path:     fmt.Sprintf("/entities/%s/subtypeOf", name),
+				Message:  fmt.Sprintf("entity %q is a subtype of itself through a cycle of subtypeOf links", name),
+			})
+		}
+	}
+}
+
+// subtypeChainCycles reports whether following name's subtypeOf links revisits
+// an entity, which means name is (transitively) a subtype of itself. It stops
+// at an undefined parent, which is reported separately.
+func subtypeChainCycles(m *model.Model, name string) bool {
+	seen := map[string]bool{}
+	for cur := name; cur != ""; {
+		e, ok := m.Entities[cur]
+		if !ok {
+			return false
+		}
+		if seen[cur] {
+			return true
+		}
+		seen[cur] = true
+		cur = e.SubtypeOf
+	}
+	return false
+}
+
+// inheritsInvariants reports whether any ancestor of name (via subtypeOf) has an
+// invariant, so a subtype's own empty invariant list is covered by its parent.
+// The walk is cycle-safe and stops at an undefined parent.
+func inheritsInvariants(m *model.Model, name string) bool {
+	seen := map[string]bool{name: true}
+	for cur := m.Entities[name].SubtypeOf; cur != "" && !seen[cur]; {
+		e, ok := m.Entities[cur]
+		if !ok {
+			return false
+		}
+		if len(e.Invariants) > 0 {
+			return true
+		}
+		seen[cur] = true
+		cur = e.SubtypeOf
+	}
+	return false
+}
+
 // runReciprocity checks that a relationship declared from both sides agrees:
 // B→A must declare the inverse of A→B's cardinality. A contradiction (e.g. A
 // says "1:n" B while B says "1:1" A) is an error — the model can't be both, and
@@ -576,9 +644,9 @@ func runReciprocity(m *model.Model, res *Result) {
 }
 
 func runCompleteness(m *model.Model, res *Result) {
-	// Entities with no invariants.
+	// Entities with no invariants — unless a supertype's invariants cover them.
 	for _, name := range m.EntityNames() {
-		if len(m.Entities[name].Invariants) == 0 {
+		if len(m.Entities[name].Invariants) == 0 && !inheritsInvariants(m, name) {
 			res.Findings = append(res.Findings, Finding{
 				Severity: SeverityWarning,
 				Category: CategoryCompleteness,

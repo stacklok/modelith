@@ -131,3 +131,21 @@ func TestGoldenExample(t *testing.T) {
 			golden, src, firstDiff(string(want), got))
 	}
 }
+
+// TestRenderEntity_SubtypeHierarchy checks that a child names its supertype and
+// a parent lists its subtypes.
+func TestRenderEntity_SubtypeHierarchy(t *testing.T) {
+	m := &model.Model{Entities: map[string]model.Entity{
+		"PaymentMethod": {Definition: "A way to pay."},
+		"Card":          {Definition: "A card.", SubtypeOf: "PaymentMethod"},
+		"BankTransfer":  {Definition: "A transfer.", SubtypeOf: "PaymentMethod"},
+	}}
+	got := Render(m)
+	if !strings.Contains(got, "**Subtype of** `PaymentMethod`") {
+		t.Errorf("expected child to name its supertype:\n%s", got)
+	}
+	// names render alphabetically, so BankTransfer precedes Card.
+	if !strings.Contains(got, "**Subtypes** — `BankTransfer`, `Card`") {
+		t.Errorf("expected parent to list its subtypes:\n%s", got)
+	}
+}

@@ -970,3 +970,93 @@ entities:
 		t.Fatalf("should not also emit the symmetric-misuse error: %+v", res.Findings)
 	}
 }
+
+// TestADR_0004_UndefinedSupertype pins that a subtypeOf naming no defined
+// entity is a semantic error.
+func TestADR_0004_UndefinedSupertype(t *testing.T) {
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  Card:
+    definition: A card that claims to be a kind of an undefined thing.
+    subtypeOf: PaymentMethod
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !findingWithMessage(res.Findings, "subtype of undefined entity") {
+		t.Fatalf("expected an undefined-supertype error, got: %+v", res.Findings)
+	}
+}
+
+// TestADR_0004_SubtypeInheritsInvariants pins that a supertype's invariants
+// cover a subtype for completeness: a subtype with no invariants of its own is
+// not flagged when its parent has them, while an unrelated empty entity is.
+func TestADR_0004_SubtypeInheritsInvariants(t *testing.T) {
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  PaymentMethod:
+    definition: A way to pay.
+    invariants:
+      - id: pm-usable
+        statement: A `+"`PaymentMethod`"+` is either active or revoked.
+  Card:
+    definition: A payment method backed by a card; adds no rule of its own.
+    subtypeOf: PaymentMethod
+  Cash:
+    definition: A standalone entity with no rule and no parent.
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findingWithMessage(res.Findings, `"Card" has no invariants`) {
+		t.Fatalf("subtype should inherit its parent's invariants for completeness: %+v", res.Findings)
+	}
+	if !findingWithMessage(res.Findings, `"Cash" has no invariants`) {
+		t.Fatalf("an unrelated empty entity should still be flagged: %+v", res.Findings)
+	}
+}
+
+// TestSubtypeCycleDetected pins that a self- or mutually-cyclic subtypeOf chain
+// is a semantic error rather than an infinite walk.
+func TestSubtypeCycleDetected(t *testing.T) {
+	self := `
+kind: DomainModel
+version: v1
+entities:
+  A:
+    definition: An entity that is a kind of itself.
+    subtypeOf: A
+`
+	res, err := Run([]byte(self))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !findingWithMessage(res.Findings, "cycle of subtypeOf") {
+		t.Fatalf("expected a self-cycle error, got: %+v", res.Findings)
+	}
+
+	mutual := `
+kind: DomainModel
+version: v1
+entities:
+  Alpha:
+    definition: A kind of Beta.
+    subtypeOf: Beta
+  Beta:
+    definition: A kind of Alpha.
+    subtypeOf: Alpha
+`
+	res, err = Run([]byte(mutual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !findingWithMessage(res.Findings, "cycle of subtypeOf") {
+		t.Fatalf("expected a mutual-cycle error, got: %+v", res.Findings)
+	}
+}
