@@ -1037,7 +1037,7 @@ entities:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !findingWithMessage(res.Findings, "cycle of subtypeOf") {
+	if !findingWithMessage(res.Findings, "cyclic subtypeOf chain") {
 		t.Fatalf("expected a self-cycle error, got: %+v", res.Findings)
 	}
 
@@ -1056,7 +1056,7 @@ entities:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !findingWithMessage(res.Findings, "cycle of subtypeOf") {
+	if !findingWithMessage(res.Findings, "cyclic subtypeOf chain") {
 		t.Fatalf("expected a mutual-cycle error, got: %+v", res.Findings)
 	}
 }

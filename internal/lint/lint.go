@@ -528,7 +528,7 @@ func runSubtypes(m *model.Model, res *Result) {
 				Severity: SeverityError,
 				Category: CategorySemantic,
 				Path:     fmt.Sprintf("/entities/%s/subtypeOf", name),
-				Message:  fmt.Sprintf("entity %q is a subtype of itself through a cycle of subtypeOf links", name),
+				Message:  fmt.Sprintf("entity %q has a cyclic subtypeOf chain: an entity cannot be a kind of itself, directly or transitively", name),
 			})
 		}
 	}
