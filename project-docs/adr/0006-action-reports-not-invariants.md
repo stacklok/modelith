@@ -33,7 +33,7 @@ delete." Its correct home is the action's own description, which is what
 - **Typed `inputs` + `reports`** (the issue's original) — rejected. Typed
   entries turn an action from a *description* into a *signature*, the clearest
   step toward an interface definition language. modelith is a communication
-  artifact, not an IDL; rules and shapes stay prose (see ADR-0005).
+  artifact, not an IDL; rules and shapes stay prose (see ADR-0007).
 - **Defer, keep prose in invariants** — rejected. The conditional-consequence
   argument above says the invariant is the wrong home even today; `reports:`
   is the small, honest fix.
