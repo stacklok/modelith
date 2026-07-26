@@ -160,6 +160,12 @@ tracked as [issue #1](https://github.com/stacklok/modelith/issues/1).
   [`.claude/rules/agent-workflow.md`](./.claude/rules/agent-workflow.md). It is
   available discipline for changes that put a correctness-critical surface at
   risk, not a mandate on every commit.
+- **Imported skills record where they came from.**
+  [`.claude/skills/`](./.claude/skills/) holds skills for working *on* modelith
+  (distinct from [`plugin/skills/`](./plugin/skills/), which ships to users).
+  When a skill is copied in from elsewhere, add its upstream source, commit,
+  licence, and local changes to
+  [`.claude/skills/SOURCES.md`](./.claude/skills/SOURCES.md).
 - **Scratch work** (spikes, smoke tests, throwaway fixtures, review
   round-records) goes in the repo-local, gitignored
   [`.scratch/`](./.scratch/) — not `/tmp` or a session temp dir. It stays
