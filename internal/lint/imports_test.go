@@ -180,6 +180,27 @@ func TestImports_Resolution(t *testing.T) {
 			}},
 		},
 		{
+			// The dot is reserved whether or not the model imports anything,
+			// which is what makes a typo in a reference reportable — and what
+			// makes a type borrowed from a wire format an error. The schema's
+			// own `type` description says so.
+			name:     "a dotted type is an error in a model with no imports",
+			attrType: "decimal(10.2)",
+			want: []wantFinding{{
+				SeverityError, CategorySemantic, typePath,
+				`attribute type "decimal(10.2)" is a malformed cross-model reference ` +
+					`(the scope "decimal(10" is not lowercase kebab-case)`,
+			}},
+		},
+		{
+			name:     "a wire-format type name is an error in a model with no imports",
+			attrType: "google.protobuf.Timestamp",
+			want: []wantFinding{{
+				SeverityError, CategorySemantic, typePath,
+				`attribute type "google.protobuf.Timestamp" is a malformed cross-model reference (more than one dot)`,
+			}},
+		},
+		{
 			name:     "qualified type naming an unimported scope",
 			imports:  []string{`"./payments.modelith.yaml"`},
 			attrType: "shipping.Carrier",

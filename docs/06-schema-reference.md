@@ -182,7 +182,7 @@ and covered in full in [Reading the Diagrams](./04-reading-the-diagrams.md):
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `name` | string | yes | Attribute name. |
-| `type` | string | yes | A **primitive** (lowercase, e.g. `string`, `integer`, `boolean`, `timestamp`) or the **PascalCase name of a defined [enum](#enum)**. A PascalCase type that names no enum is flagged. |
+| `type` | string | yes | A **primitive** (lowercase, e.g. `string`, `integer`, `boolean`, `timestamp`) or the **PascalCase name of a defined [enum](#enum)**. A PascalCase type that names no enum is flagged. A dot is reserved for a [cross-model reference](#imports) and is an error anywhere else, `imports` or no `imports`. |
 | `description` | string | no | |
 | `derived` | boolean | no | True if computed from other state rather than stored. Forces `derivation`. |
 | `derivation` | string | no | How a derived attribute is computed. Required when `derived` is true. |
@@ -313,7 +313,11 @@ Six rules are worth knowing before you use this:
   has to be exactly `scope.Name` — one dot, a slug before it, a PascalCase item
   name after. `payments.v2.PaymentMethod`, `.PaymentMethod` and `payments.` are
   errors that say which way they are malformed, not types quietly read as
-  primitives.
+  primitives. The dot is reserved in **every** model, including one with no
+  `imports` at all: that is what makes a typo in a reference reportable, and it
+  means `decimal(10.2)` or `google.protobuf.Timestamp` is an error, not a type.
+  Name such a type without the dot (`decimal`, `Timestamp`) — this format
+  describes concepts, not wire formats.
 - **The binding is local.** Two models may import the same file under different
   scopes, and neither one's choice is visible to the other. Two imports binding
   the *same* scope in one model is an error — give one of them an explicit,

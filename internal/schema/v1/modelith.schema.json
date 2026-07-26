@@ -251,7 +251,7 @@
           "minLength": 1
         },
         "type": {
-          "description": "Conceptual type: a primitive (e.g. \"string\", \"integer\", \"boolean\", \"timestamp\") or the PascalCase name of an enum defined under top-level \"enums\".",
+          "description": "Conceptual type: a primitive (e.g. \"string\", \"integer\", \"boolean\", \"timestamp\") or the PascalCase name of an enum defined under top-level \"enums\". A dot is RESERVED for cross-model references: a type containing one must be a well-formed \"scope.Name\" naming an enum in an imported model, so \"decimal(10.2)\" and \"google.protobuf.Timestamp\" are rejected. The rule holds in every model, including one with no \"imports\" — that is what makes a typo in a reference reportable instead of readable as an exotic primitive.",
           "type": "string",
           "minLength": 1
         },
