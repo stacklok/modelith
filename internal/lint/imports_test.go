@@ -248,6 +248,41 @@ func TestImports_Resolution(t *testing.T) {
 	}
 }
 
+// TestADR_0012_ImporterBindsScope pins that the scope belongs to the importing
+// model: the same file resolves under whatever scope each importer binds it to,
+// and a model has no say in — and no field for — what it is called elsewhere.
+func TestADR_0012_ImporterBindsScope(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{"docs/payments.modelith.yaml": paymentsModel}
+
+	t.Run("same file, different bindings", func(t *testing.T) {
+		t.Parallel()
+		for _, binding := range []struct{ entry, scope string }{
+			{`"./payments.modelith.yaml"`, "payments"},
+			{"{scope: money, path: ./payments.modelith.yaml}", "money"},
+		} {
+			res, err := Run(importerPath, []byte(importer([]string{binding.entry}, binding.scope+".PaymentMethod")), files)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertFindings(t, importFindings(res.Findings), nil)
+		}
+	})
+
+	t.Run("a model cannot name itself", func(t *testing.T) {
+		t.Parallel()
+		src := "kind: DomainModel\nversion: v1\nscope: payments\nentities:\n  Visit:\n    definition: One stay.\n"
+		res, err := Run(importerPath, []byte(src), files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if countBy(res.Findings, SeverityError, CategoryStructural) == 0 {
+			t.Fatalf("expected a top-level `scope:` to be rejected, got: %+v", res.Findings)
+		}
+	})
+}
+
 // TestADR_0010_NonTransitiveResolution pins that resolution does not recurse:
 // an item defined in a model that an *imported* model imports is unreachable,
 // and the file it lives in is never read.

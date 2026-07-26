@@ -31,8 +31,7 @@ the schema). Print the schema any time with `modelith schema`.
 | `version` | string | yes | Schema revision. Currently `v1`. |
 | `title` | string | no | Heading used when rendering. |
 | `description` | string | no | One-paragraph summary. |
-| `scope` | string | no | Kebab-case slug naming this model where another model references its items. Needed only to *be* imported. See [Imports](#imports). |
-| `imports` | list | no | Paths to other model files whose items this one references, relative to this file. See [Imports](#imports). |
+| `imports` | list | no | Other model files whose items this one references, each a path relative to this file. See [Imports](#imports). |
 | `glossary` | map | no | Ubiquitous-language terms that aren't entities. See [Glossary](#glossary). |
 | `enums` | map | no | First-class enumerated types. See [Enum](#enum). |
 | `entities` | map | no | Keyed by canonical PascalCase entity name. If present, must contain at least one entity. |
@@ -265,22 +264,7 @@ typically a shared enum. Defining it in both and asserting in prose that they
 match leaves nothing to check, and they drift. Instead, one model owns the
 definition and the other **references** it.
 
-The referenced model declares a slug:
-
-```yaml
-# payments.modelith.yaml
-kind: DomainModel
-version: v1
-scope: payments
-enums:
-  PaymentMethod:
-    values:
-      - name: card
-      - name: transfer
-```
-
-The referencing model lists a path to it and writes `scope.Name` at the
-reference site:
+List the other model's file, and write `scope.Name` where you reference it:
 
 ```yaml
 # garage.modelith.yaml
@@ -296,16 +280,37 @@ entities:
         type: payments.PaymentMethod
 ```
 
+The imported file needs no cooperation at all — it is an ordinary model that
+happens to define a `PaymentMethod` enum. **The scope is bound by the model
+doing the importing**, and defaults to the file's basename with
+`.modelith.yaml` stripped: `./payments.modelith.yaml` binds `payments`.
+
+Name it explicitly when the filename yields no usable slug, or when the obvious
+one is already taken:
+
+```yaml
+imports:
+  - ./payments.modelith.yaml            # binds "payments"
+  - scope: billing                      # binds "billing"
+    path: ./legacy/pay-v2.modelith.yaml
+```
+
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `scope` | string | no | Lowercase kebab-case slug (`^[a-z][a-z0-9-]+$`). Optional — a model nobody imports never needs one — but required in order to be imported. |
-| `imports` | list of string | no | Paths to model files, each relative to *this* file. `..` is fine; an absolute path is an error, since it wouldn't resolve in another checkout. |
+| `scope` | string | yes (explicit form) | The slug written before an item's name. Lowercase kebab-case (`^[a-z][a-z0-9-]+$`). |
+| `path` | string | yes (explicit form) | Path to the model file, relative to *this* one. |
+
+A bare string is the same thing with the scope derived — `./x.modelith.yaml` is
+exactly `{scope: x, path: ./x.modelith.yaml}`. If the filename doesn't yield a
+valid slug (`./Pay Ments.yaml`), the linter says so and points at the explicit
+form.
 
 Four rules are worth knowing before you use this:
 
-- **The slug is declared once, by the imported model.** An importing model
-  lists a path, never a slug, so there is nothing for the two files to disagree
-  about. Two imports declaring the same `scope` is an error — rename one.
+- **The binding is local.** Two models may import the same file under different
+  scopes, and neither one's choice is visible to the other. Two imports binding
+  the *same* scope in one model is an error — give one of them an explicit,
+  different scope.
 - **Resolution does not recurse.** Only items defined *directly* in a listed
   file are reachable. If `garage` imports `payments` and `payments` imports
   `shipping`, `shipping.Carrier` is not available in `garage` — import it
@@ -319,6 +324,11 @@ Four rules are worth knowing before you use this:
 - **Nothing is fetched.** `imports` names files that are already in your
   repository; `lint` and `render` never touch the network
   ([ADR-0011](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0011-network-boundary.md)).
+
+Rendered Markdown names each import and links it to that model's rendered `.md`,
+and a qualified type links straight to the item's heading there. The renderer
+never opens an imported file, so a link points at where the Markdown *would* be:
+render the imported model too, or the link dangles.
 
 The linter reports a qualified type that doesn't resolve as an **error**, while
 an *unqualified* PascalCase type that names no enum is only a **warning**. The
@@ -377,8 +387,8 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
     - a scenario `invariants_touched` or an action `preserves` that references an
       invariant id no entity or model-level invariant declares;
     - an [import](#imports) that is absolute, unreadable, not a domain model,
-      declares no `scope`, or declares a `scope` another import already
-      declared;
+      binds a scope another import already bound, or is a bare path whose
+      filename yields no valid slug;
     - a qualified attribute `type` whose scope isn't imported, or that names
       no enum in the model it resolves to.
   - **Warnings** (likely-but-not-certainly wrong):
@@ -395,11 +405,10 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
     - an attribute `type` that looks like an enum reference (PascalCase) but
       names no defined enum — a *warning* where the qualified `scope.Name` form
       is an error, for the reason given under [Imports](#imports);
-    - an [import](#imports) nothing references;
     - an action `actor` that is neither a defined entity nor a glossary term.
 - **Completeness** checks (advisory warnings): entities with no invariants;
   entities no scenario exercises; a glossary term nothing references; an enum no
-  attribute uses.
+  attribute uses; an [import](#imports) nothing references.
 
   These are advisory on purpose. An entity that genuinely has no rule to state
   is fine — leave its invariants empty rather than inventing a filler rule that
