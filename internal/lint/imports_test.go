@@ -139,6 +139,7 @@ func TestImports_Resolution(t *testing.T) {
 		// covers the tree without one.
 		".git":                             "",
 		"docs/payments.modelith.yaml":      paymentsModel,
+		"docs/shipping.modelith.yml":       paymentsModel,
 		"payments/payments.modelith.yaml":  paymentsModel,
 		"docs/legacy/pay-v2.modelith.yaml": paymentsModel,
 		"docs/not-a-model.yaml":            "kind: SomethingElse\nversion: v1\n",
@@ -161,6 +162,14 @@ func TestImports_Resolution(t *testing.T) {
 			name:     "parent-relative import resolves",
 			imports:  []string{`"../payments/payments.modelith.yaml"`},
 			attrType: "payments.PaymentMethod",
+		},
+		{
+			// A .yml model file is a model file: the derived scope strips the
+			// whole ".modelith.yml", not just the extension, or the bare form
+			// would bind "shipping.modelith" and resolve nothing.
+			name:     "bare import of a .modelith.yml file resolves",
+			imports:  []string{`"./shipping.modelith.yml"`},
+			attrType: "shipping.PaymentMethod",
 		},
 		{
 			name:     "qualified type with no imports at all",

@@ -222,9 +222,12 @@ func TestScopeFromPath(t *testing.T) {
 	cases := map[string]string{
 		"./payments.modelith.yaml":        "payments",
 		"../shared/billing.modelith.yaml": "billing",
-		"./legacy/pay-v2.yaml":            "pay-v2",
-		"./Payments.modelith.yaml":        "Payments",
-		"noextension":                     "noextension",
+		// RenderedPath treats .yml as a model file, so the scope has to come out
+		// of one too: trimming only the extension would leave "payments.modelith".
+		"./payments.modelith.yml":  "payments",
+		"./legacy/pay-v2.yaml":     "pay-v2",
+		"./Payments.modelith.yaml": "Payments",
+		"noextension":              "noextension",
 	}
 	for in, want := range cases {
 		if got := ScopeFromPath(in); got != want {

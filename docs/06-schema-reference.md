@@ -283,7 +283,8 @@ entities:
 The imported file needs no cooperation at all — it is an ordinary model that
 happens to define a `PaymentMethod` enum. **The scope is bound by the model
 doing the importing**, and defaults to the file's basename with
-`.modelith.yaml` stripped: `./payments.modelith.yaml` binds `payments`.
+`.modelith.yaml` — or `.modelith.yml` — stripped: `./payments.modelith.yaml`
+binds `payments`.
 
 Name it explicitly when the filename yields no usable slug, or when the obvious
 one is already taken:

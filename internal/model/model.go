@@ -86,13 +86,17 @@ func (i *Import) UnmarshalJSON(data []byte) error {
 }
 
 // ScopeFromPath derives the scope a bare import path binds: the basename with
-// ".modelith.yaml" — or failing that, the final extension — stripped. The
-// result is not guaranteed to be a valid slug; the linter reports one that
-// isn't, since only an explicitly written scope passes through the schema.
+// ".modelith.yaml" or ".modelith.yml" — or failing that, the final extension —
+// stripped. Both spellings are stripped whole, because trimming ".yml" alone
+// leaves "payments.modelith", which is no slug at all. The result is not
+// guaranteed to be a valid slug; the linter reports one that isn't, since only
+// an explicitly written scope passes through the schema.
 func ScopeFromPath(p string) string {
 	base := path.Base(p)
-	if trimmed, ok := strings.CutSuffix(base, ".modelith.yaml"); ok {
-		return trimmed
+	for _, suffix := range []string{".modelith.yaml", ".modelith.yml"} {
+		if trimmed, ok := strings.CutSuffix(base, suffix); ok {
+			return trimmed
+		}
 	}
 	return strings.TrimSuffix(base, path.Ext(base))
 }

@@ -76,7 +76,7 @@
       "description": "Another model this one references: either a bare path (the scope is the file's basename with its extension stripped) or an object naming the scope explicitly.",
       "oneOf": [
         {
-          "description": "A path to a model file, relative to this one. Its basename with \".modelith.yaml\" (or the final extension) stripped is the scope.",
+          "description": "A path to a model file, relative to this one. Its basename with \".modelith.yaml\" or \".modelith.yml\" (or, failing either, the final extension) stripped is the scope.",
           "type": "string",
           "minLength": 1
         },
