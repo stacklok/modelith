@@ -77,17 +77,22 @@ var (
 	printer      = message.NewPrinter(language.English)
 )
 
-// Run validates the given YAML bytes and returns all findings.
-func Run(data []byte) (*Result, error) {
+// Run validates the model at path and returns all findings. src is the model's
+// own bytes; fr reads the files its `imports:` name, resolved relative to
+// path's directory. A nil fr reads them from the local filesystem.
+func Run(path string, src []byte, fr FileReader) (*Result, error) {
 	res := &Result{}
+	if fr == nil {
+		fr = OSFiles{}
+	}
 
 	// Layer 1: structural validation against the JSON Schema.
-	structuralOK := runStructural(data, res)
+	structuralOK := runStructural(src, res)
 
 	// If it does not even parse into our typed model, stop — semantic and
 	// completeness checks need a model to work with. The structural layer has
 	// already reported why.
-	m, err := model.Parse(data)
+	m, err := model.Parse(src)
 	if err != nil {
 		if structuralOK {
 			// Schema passed but typed parsing failed; surface it so we never
@@ -104,6 +109,7 @@ func Run(data []byte) (*Result, error) {
 	}
 
 	runSemantic(m, res)
+	runImports(path, m, fr, res)
 	runRelationshipShape(m, res)
 	runSubtypes(m, res)
 	runReciprocity(m, res)
@@ -182,10 +188,15 @@ func runStructural(data []byte, res *Result) bool {
 		return false
 	}
 
+	before := len(res.Findings)
+	// Say what a cross-model entity reference actually is before the schema
+	// reports it as a pattern violation, and suppress its opaque message so one
+	// mistake reads as one finding.
+	qualified := reportQualifiedEntityRefs(inst, res)
+
 	if err := sch.Validate(inst); err != nil {
 		if ve, ok := err.(*jsonschema.ValidationError); ok {
-			before := len(res.Findings)
-			collectLeaves(ve, res)
+			collectLeaves(ve, res, qualified)
 			return len(res.Findings) == before
 		}
 		res.Findings = append(res.Findings, Finding{
@@ -195,14 +206,17 @@ func runStructural(data []byte, res *Result) bool {
 		})
 		return false
 	}
-	return true
+	return len(res.Findings) == before
 }
 
-func collectLeaves(e *jsonschema.ValidationError, res *Result) {
+func collectLeaves(e *jsonschema.ValidationError, res *Result, skip map[string]bool) {
 	if len(e.Causes) == 0 {
 		ptr := "/" + strings.Join(e.InstanceLocation, "/")
 		if ptr == "/" {
 			ptr = ""
+		}
+		if skip[ptr] {
+			return
 		}
 		msg := e.Error()
 		if e.ErrorKind != nil {
@@ -217,7 +231,7 @@ func collectLeaves(e *jsonschema.ValidationError, res *Result) {
 		return
 	}
 	for _, c := range e.Causes {
-		collectLeaves(c, res)
+		collectLeaves(c, res, skip)
 	}
 }
 
@@ -286,14 +300,19 @@ func runSemantic(m *model.Model, res *Result) {
 	for _, name := range m.EntityNames() {
 		ent := m.Entities[name]
 		for i, rel := range ent.Relationships {
-			if !entitySet[rel.Entity] {
+			switch {
+			case qualifiedRefRE.MatchString(rel.Entity):
+				// Already reported as an unsupported cross-model reference by
+				// reportQualifiedEntityRefs; calling it an undefined entity too
+				// would report one mistake twice.
+			case !entitySet[rel.Entity]:
 				res.Findings = append(res.Findings, Finding{
 					Severity: SeverityError,
 					Category: CategorySemantic,
 					Path:     fmt.Sprintf("/entities/%s/relationships/%d/entity", name, i),
 					Message:  fmt.Sprintf("relationship targets undefined entity %q", rel.Entity),
 				})
-			} else if rel.Ownership == "owned" && m.Entities[rel.Entity].Derived {
+			case rel.Ownership == "owned" && m.Entities[rel.Entity].Derived:
 				res.Findings = append(res.Findings, Finding{
 					Severity: SeverityWarning,
 					Category: CategorySemantic,
@@ -535,6 +554,9 @@ func runSubtypes(m *model.Model, res *Result) {
 		parent := m.Entities[name].SubtypeOf
 		if parent == "" {
 			continue
+		}
+		if qualifiedRefRE.MatchString(parent) {
+			continue // reported as an unsupported cross-model reference
 		}
 		if _, ok := m.Entities[parent]; !ok {
 			res.Findings = append(res.Findings, Finding{

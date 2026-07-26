@@ -7,6 +7,11 @@ import (
 	"testing"
 )
 
+// testModelPath stands in for the linted file's path. Only a model with
+// imports cares what it is (they resolve relative to its directory), so the
+// inline fixtures here pass it and a nil FileReader.
+const testModelPath = "model.modelith.yaml"
+
 func countBy(fs []Finding, sev Severity, cat Category) int {
 	n := 0
 	for _, f := range fs {
@@ -18,11 +23,12 @@ func countBy(fs []Finding, sev Severity, cat Category) int {
 }
 
 func TestExampleIsClean(t *testing.T) {
-	data, err := os.ReadFile("../../examples/example.modelith.yaml")
+	const path = "../../examples/example.modelith.yaml"
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Run(data)
+	res, err := Run(path, data, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +59,7 @@ entities:
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
-			res, err := Run([]byte(src))
+			res, err := Run(testModelPath, []byte(src), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +76,7 @@ entities:
 func TestMalformedYAMLIsStructuralError(t *testing.T) {
 	// Unbalanced brackets — not parseable as YAML at all.
 	src := "kind: DomainModel\nentities: {Project: [unterminated\n"
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +98,7 @@ func TestNonObjectDocumentIsStructuralError(t *testing.T) {
 	// A bare scalar is valid YAML/JSON but not an object: the schema rejects it
 	// and lint should still produce a blocking structural finding rather than
 	// proceeding to typed parsing.
-	res, err := Run([]byte(`"just a string"`))
+	res, err := Run(testModelPath, []byte(`"just a string"`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +115,7 @@ entities:
   Project:
     definition: A container.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +144,7 @@ entities:
       - entity: Ghost
         cardinality: "1:n"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +168,7 @@ scenarios:
     steps:
       - "Use the ` + "`Project`" + `"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +203,7 @@ entities:
       - id: always-valid
         statement: "Always valid"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +235,7 @@ scenarios:
     invariants_touched:
       - has-an-owner
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +289,7 @@ entities:
       - entity: Project
         cardinality: "1:1"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +319,7 @@ entities:
       - entity: Project
         cardinality: "n:1"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +351,7 @@ entities:
       - entity: Project
         cardinality: "1:1"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +368,7 @@ entities:
   Lonely:
     definition: An entity with no invariants and no scenario.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +400,7 @@ scenarios:
     steps: ["the ` + "`Project`" + ` does a thing"]
     invariants_touched: [no-such-rule]
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +428,7 @@ entities:
       - id: dup
         statement: "Second"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +453,7 @@ invariants:
   - id: dup
     statement: "Model-level rule for the ` + "`Project`" + `"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +488,7 @@ scenarios:
     steps: ["the ` + "`Project`" + ` is archived"]
     invariants_touched: [cross-entity-rule]
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +517,7 @@ scenarios:
     steps: ["the ` + "`Project`" + ` is used"]
     invariants_touched: [ghost-model-rule]
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +543,7 @@ entities:
   User:
     definition: A principal.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +575,7 @@ scenarios:
     actors: [Maintainer]
     steps: ["a ` + "`Maintainer`" + ` touches the ` + "`Project`" + ` and the ` + "`User`" + `"]
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +622,7 @@ entities:
   User:
     definition: A principal.
 `
-			res, err := Run([]byte(src))
+			res, err := Run(testModelPath, []byte(src), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -664,7 +670,7 @@ entities:
   User:
     definition: A principal.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +758,7 @@ entities:
       - entity: Alpha
         cardinality: "n:1"` + field("ownership", tc.bOwn) + field("role", tc.bRole) + `
 `
-			res, err := Run([]byte(src))
+			res, err := Run(testModelPath, []byte(src), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -822,7 +828,7 @@ scenarios:
     actors: [Alpha]
     steps: ["an ` + "`Alpha`" + ` gains a ` + "`Beta`" + `"]
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -978,7 +984,7 @@ func TestADR_0008_AmbiguousPairingIsWarning(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			res, err := Run([]byte("kind: DomainModel\nversion: v1\nentities:" + tc.rels))
+			res, err := Run(testModelPath, []byte("kind: DomainModel\nversion: v1\nentities:"+tc.rels), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1024,7 +1030,7 @@ entities:
       - id: real-rule
         statement: "Has a rule"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1044,7 +1050,7 @@ entities:
       - name: status
         type: ProjectStatus
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1067,7 +1073,7 @@ entities:
   Project:
     definition: A container.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1094,7 +1100,7 @@ entities:
         type: integer
         derived: true
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1117,7 +1123,7 @@ entities:
         type: integer
         derivation: "counts something"
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1137,7 +1143,7 @@ entities:
     definition: A computed summary. No derivation string given.
     derived: true
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1157,7 +1163,7 @@ entities:
     definition: A computed summary.
     derivation: "Computed from other state."
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1182,7 +1188,7 @@ entities:
     derived: true
     derivation: Recomputed on every query from the resolved geometry.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1223,7 +1229,7 @@ entities:
     derived: true
     derivation: Recomputed on every query from the resolved geometry.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1254,7 +1260,7 @@ scenarios:
     steps: ["the ` + "`Project`" + ` is used"]
     invariants_touched: [rule]
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1287,7 +1293,7 @@ entities:
         symmetric: true
         role: the unordered pair
 `
-	res, err := Run([]byte(valid))
+	res, err := Run(testModelPath, []byte(valid), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1309,7 +1315,7 @@ entities:
   Person:
     definition: A person.
 `
-	res, err = Run([]byte(invalid))
+	res, err = Run(testModelPath, []byte(invalid), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1333,7 +1339,7 @@ entities:
   B:
     definition: Another entity.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1363,7 +1369,7 @@ entities:
         cardinality: "0..n:1"
         role: owns
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1389,7 +1395,7 @@ entities:
   B:
     definition: Another.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1412,7 +1418,7 @@ entities:
     definition: A card that claims to be a kind of an undefined thing.
     subtypeOf: PaymentMethod
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1440,7 +1446,7 @@ entities:
   Cash:
     definition: A standalone entity with no rule and no parent.
 `
-	res, err := Run([]byte(src))
+	res, err := Run(testModelPath, []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1463,7 +1469,7 @@ entities:
     definition: An entity that is a kind of itself.
     subtypeOf: A
 `
-	res, err := Run([]byte(self))
+	res, err := Run(testModelPath, []byte(self), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1482,7 +1488,7 @@ entities:
     definition: A kind of Alpha.
     subtypeOf: Alpha
 `
-	res, err = Run([]byte(mutual))
+	res, err = Run(testModelPath, []byte(mutual), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

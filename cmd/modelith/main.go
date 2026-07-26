@@ -127,7 +127,7 @@ func lintCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("%s: %w", path, err)
 				}
-				res, err := lint.Run(data)
+				res, err := lint.Run(path, data, lint.OSFiles{})
 				if err != nil {
 					return fmt.Errorf("%s: %w", path, err)
 				}
