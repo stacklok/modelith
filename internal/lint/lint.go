@@ -113,7 +113,9 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 	// Imports resolve only against a document the schema accepted. A scope the
 	// schema already rejected would otherwise bind anyway, and the advice that
 	// follows would tell the author to write syntax that cannot work — the same
-	// reason the version check gates schema validation.
+	// reason the version check gates schema validation. A cross-model reference
+	// in an entity position is not one of those rejections (see runStructural),
+	// so it does not take the imports layer down with it.
 	if structuralOK {
 		runImports(path, m, files, res)
 	}
@@ -139,8 +141,10 @@ func Structural(data []byte) []Finding {
 	return res.Findings
 }
 
-// runStructural validates against the JSON Schema. Returns true if the document
-// is structurally valid.
+// runStructural validates against the JSON Schema. Returns true if the schema
+// accepted the document — which the cross-model entity references reported here
+// do not affect, since they are a supported-feature limit rather than a shape
+// the imports list depends on.
 func runStructural(data []byte, res *Result) bool {
 	jsonBytes, err := yaml.YAMLToJSON(data)
 	if err != nil {
@@ -195,12 +199,15 @@ func runStructural(data []byte, res *Result) bool {
 		return false
 	}
 
-	before := len(res.Findings)
 	// Say what a cross-model entity reference actually is before the schema
 	// reports it as a pattern violation, and suppress its opaque message so one
-	// mistake reads as one finding.
+	// mistake reads as one finding. It is reported on its own terms and is not
+	// counted against the document's structural validity: a broken import in the
+	// same file is an unrelated mistake, and holding the imports layer back
+	// until this one is fixed would hide it.
 	qualified := reportQualifiedEntityRefs(inst, res)
 
+	before := len(res.Findings)
 	if err := sch.Validate(inst); err != nil {
 		if ve, ok := err.(*jsonschema.ValidationError); ok {
 			collectLeaves(ve, res, qualified)
@@ -213,7 +220,7 @@ func runStructural(data []byte, res *Result) bool {
 		})
 		return false
 	}
-	return len(res.Findings) == before
+	return true
 }
 
 func collectLeaves(e *jsonschema.ValidationError, res *Result, skip map[string]bool) {

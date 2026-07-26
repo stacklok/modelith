@@ -666,9 +666,38 @@ entities:
 	}
 }
 
-// TestRun_NilFileReaderReadsFromDisk covers the documented default: a nil
-// FileReader resolves imports against the local filesystem.
-func TestRun_NilFileReaderReadsFromDisk(t *testing.T) {
+// TestRun_QualifiedEntityReferenceDoesNotGateTheImportsLayer pins that two
+// unrelated mistakes are reported in one run. The cross-model entity reference
+// used to count as a structural failure, which skipped the imports layer
+// entirely: the broken import below stayed invisible until the subtypeOf was
+// fixed, and fixing it produced a second, unannounced round of errors.
+func TestRun_QualifiedEntityReferenceDoesNotGateTheImportsLayer(t *testing.T) {
+	t.Parallel()
+
+	src := `kind: DomainModel
+version: v1
+imports:
+  - "./gone.modelith.yaml"
+entities:
+  Visit:
+    definition: One car's stay in the garage.
+    subtypeOf: payments.Payment
+`
+	res, err := Run(importerPath, []byte(src), fakeFiles{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFindings(t, importFindings(res.Findings), []wantFinding{
+		{SeverityError, CategoryStructural, "/entities/Visit/subtypeOf",
+			"is a cross-model reference, which is not supported in an entity position"},
+		{SeverityError, CategorySemantic, "/imports/0",
+			`import "./gone.modelith.yaml" cannot be read`},
+	})
+}
+
+// TestRun_NilFilesReadsFromDisk covers the documented default: a nil Files
+// resolves imports against the local filesystem.
+func TestRun_NilFilesReadsFromDisk(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
