@@ -108,6 +108,15 @@ tasks:
     cmds:
       - claude plugin validate ./plugin --strict
 
+  mermaid-check:
+    desc: >-
+      Parse every emitted/committed Mermaid diagram with the real mermaid-cli
+      (needs npx/node). NOT part of `check` — deliberately, unlike
+      validate-plugin — so `task check` stays green for contributors without
+      node/npm installed; CI runs the real thing instead.
+    cmds:
+      - bash hack/mermaid-check.sh
+
   check:
     desc: CI parity (vet, staticcheck, golangci-lint, test, lint models, render-check) plus the local-only claude-based validate-plugin (CI does a lighter jq check instead)
     cmds:

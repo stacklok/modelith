@@ -63,3 +63,12 @@ jobs:
             head -n 1 "$s" | grep -q '^---$' || { echo "::error::$s missing YAML frontmatter"; exit 1; }
           done
           echo "plugin manifest + ${#skills[@]} skill(s) OK"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Mermaid parse check
+        # Unlike the plugin-validation step above, this runs the real check —
+        # the actual mmdc binary — rather than a lighter substitute, since
+        # task mermaid-check is deliberately excluded from `task check` (it
+        # needs node/npm, which `task check` must not require locally).
+        run: bash hack/mermaid-check.sh

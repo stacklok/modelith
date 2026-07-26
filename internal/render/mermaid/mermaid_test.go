@@ -1,6 +1,8 @@
 package mermaid
 
 import (
+	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -8,6 +10,45 @@ import (
 
 	"github.com/stacklok/modelith/internal/model"
 )
+
+// firstDiff reports the first line where want and got differ, so a golden
+// failure points at the change instead of just saying "they differ." Mirrors
+// internal/render/markdown's helper of the same name.
+func firstDiff(want, got string) string {
+	wl := strings.Split(want, "\n")
+	gl := strings.Split(got, "\n")
+	n := len(wl)
+	if len(gl) > n {
+		n = len(gl)
+	}
+	for i := 0; i < n; i++ {
+		var w, g string
+		if i < len(wl) {
+			w = wl[i]
+		}
+		if i < len(gl) {
+			g = gl[i]
+		}
+		if w != g {
+			return fmt.Sprintf("first difference at line %d:\n  want: %q\n  got:  %q", i+1, w, g)
+		}
+	}
+	return "(no line-level difference found)"
+}
+
+// assertGolden renders m and compares it byte-for-byte against the named file
+// under testdata/, failing with the first differing line on mismatch.
+func assertGolden(t *testing.T, m *model.Model, goldenPath string) {
+	t.Helper()
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ER(m)
+	if got != string(want) {
+		t.Errorf("rendered output does not match %s.\n%s", goldenPath, firstDiff(string(want), got))
+	}
+}
 
 func TestERDeclaresAllEntities(t *testing.T) {
 	m := &model.Model{Entities: map[string]model.Entity{
@@ -557,4 +598,71 @@ func TestERDedupesSemanticallyEqualInverses(t *testing.T) {
 	if n := strings.Count(ER(m), `: "owns"`); n != 1 {
 		t.Errorf("expected semantically-equal inverse deduped to 1 edge, got %d:\n%s", n, ER(m))
 	}
+}
+
+// TestERRole_HostileCharacters pins current output for a role that packs
+// every hostile character sanitize knows about (backticks, quotes, brackets, a
+// literal newline) alongside three it does NOT neutralize: '<', '>', and '%%'.
+// Those three pass through unescaped into the generated diagram source — a
+// known bug tracked as issue #29 (a role can inject a Mermaid directive via
+// "%%{...}%%", or lose text that looks like "<...>" markup). This golden pins
+// the CURRENT (buggy) behavior on purpose, not the desired one: fixing #29
+// must update this golden as part of that fix, not treat the diff as a
+// regression.
+func TestERRole_HostileCharacters(t *testing.T) {
+	t.Parallel()
+	role := "he said \"hi\" [bracket] `tick` {brace} <angle> #hash %%pct\nsecond line"
+	m := &model.Model{Entities: map[string]model.Entity{
+		"A": {Definition: "a", Relationships: []model.Relationship{
+			{Entity: "B", Cardinality: "1:n", Role: role, Ownership: "owned"},
+		}},
+		"B": {Definition: "b"},
+	}}
+	assertGolden(t, m, "testdata/hostile_role.golden.mmd")
+}
+
+// TestERRole_LongUnbrokenWord pins current output for a very long role with no
+// spaces to break on. The renderer has no wrapping logic, so it passes the
+// word through whole; this guards that a long label doesn't get truncated,
+// panic, or otherwise misrender.
+func TestERRole_LongUnbrokenWord(t *testing.T) {
+	t.Parallel()
+	longWord := strings.Repeat("Loremipsumdolorsitametconsecteturadipiscingelit", 4) // 188 chars, no spaces
+	m := &model.Model{Entities: map[string]model.Entity{
+		"A": {Definition: "a", Relationships: []model.Relationship{
+			{Entity: "B", Cardinality: "1:n", Role: longWord, Ownership: "owned"},
+		}},
+		"B": {Definition: "b"},
+	}}
+	assertGolden(t, m, "testdata/long_word_role.golden.mmd")
+}
+
+// TestERSelfRow_EntityNamedSelfDoesNotCollide guards an entity literally named
+// "Self": the self-row attribute names are always the fixed literal "self",
+// "self2", … regardless of the entity's own name, so an entity named "Self"
+// must not produce a doubled or otherwise confused row name.
+func TestERSelfRow_EntityNamedSelfDoesNotCollide(t *testing.T) {
+	t.Parallel()
+	m := &model.Model{Entities: map[string]model.Entity{
+		"Self": {Definition: "s", Relationships: []model.Relationship{
+			{Entity: "Self", Cardinality: "0..5:1", Role: "`Mirror`"},
+			{Entity: "Self", Cardinality: "1:2", Role: "`Twin`", Ownership: "owned"},
+		}},
+	}}
+	assertGolden(t, m, "testdata/self_named_entity.golden.mmd")
+}
+
+// TestER_UndeclaredRelationshipTarget pins that ER renders a well-formed edge
+// to a relationship target that has no entry in Entities at all. ER does not
+// validate references — that's modelith lint's job — so it must render
+// without panicking, and the undeclared entity gets no {} block of its own
+// since it never appears in EntityNames().
+func TestER_UndeclaredRelationshipTarget(t *testing.T) {
+	t.Parallel()
+	m := &model.Model{Entities: map[string]model.Entity{
+		"Node": {Definition: "n", Relationships: []model.Relationship{
+			{Entity: "Ghost", Cardinality: "1:n", Role: "haunts", Ownership: "owned"},
+		}},
+	}}
+	assertGolden(t, m, "testdata/undeclared_target.golden.mmd")
 }

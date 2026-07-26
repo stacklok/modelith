@@ -19,6 +19,8 @@ bottom of this page.
 - **[Task](https://taskfile.dev)** — the task runner (`brew install go-task`).
 - **`jq`** — used by the CI plugin check (`brew install jq`).
 - **The `claude` CLI** — only needed to validate/develop the plugin locally.
+- **Node.js / `npx`** — only needed for `task mermaid-check` (runs
+  `@mermaid-js/mermaid-cli` via `npx`); not required for `task check`.
 
 ## Building the binary
 
@@ -54,7 +56,8 @@ arguments to list every target.
 | `task render` | Re-render the example models to Markdown. |
 | `task render-check` | Verify the committed Markdown is up to date. |
 | `task validate-plugin` | Validate the plugin with `claude plugin validate --strict` (needs the `claude` CLI). |
-| `task check` | CI parity (vet, staticcheck, test, lint-models, render-check) plus `validate-plugin`. |
+| `task mermaid-check` | Parse every emitted/committed Mermaid diagram with the real `mermaid-cli` (needs `npx`/node). Not part of `task check` — see below. |
+| `task check` | CI parity (vet, staticcheck, test, lint-models, render-check) plus `validate-plugin`. Does **not** run `mermaid-check`, so contributors without node/npm still get a green `task check`; CI runs the real Mermaid parse check as its own step instead. |
 
 <details>
 <summary>CI runs a lighter plugin check</summary>
