@@ -248,6 +248,193 @@ func TestImports_Resolution(t *testing.T) {
 	}
 }
 
+// TestImports_MalformedQualifiedType covers a type that contains a dot but is
+// not a well-formed "scope.Name". Each shape names the way it is malformed
+// rather than passing silently as a primitive.
+func TestImports_MalformedQualifiedType(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{"docs/payments.modelith.yaml": paymentsModel}
+	const typePath = "/entities/Visit/attributes/0/type"
+
+	cases := []struct {
+		name     string
+		attrType string
+		reason   string
+		// unusedImport is set where the malformed type names no bound scope, so
+		// the import genuinely goes unreferenced.
+		unusedImport bool
+	}{
+		{name: "two dots", attrType: "payments.v2.PaymentMethod", reason: "more than one dot"},
+		{name: "leading dot", attrType: ".PaymentMethod", reason: "nothing before the dot", unusedImport: true},
+		{name: "trailing dot", attrType: "payments.", reason: "nothing after the dot"},
+		{name: "scope is not a slug", attrType: "Payments.PaymentMethod", reason: `the scope "Payments" is not lowercase kebab-case`, unusedImport: true},
+		{name: "item is not PascalCase", attrType: "payments.paymentMethod", reason: `the item name "paymentMethod" is not PascalCase`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			want := []wantFinding{{
+				SeverityError, CategorySemantic, typePath,
+				fmt.Sprintf("attribute type %q is a malformed cross-model reference (%s)", tc.attrType, tc.reason),
+			}}
+			if tc.unusedImport {
+				want = append(want, wantFinding{
+					SeverityWarning, CategoryCompleteness, "/imports/0", "is never referenced",
+				})
+			}
+			src := importer([]string{`"./payments.modelith.yaml"`}, tc.attrType)
+			res, err := Run(importerPath, []byte(src), files)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertFindings(t, importFindings(res.Findings), want)
+		})
+	}
+}
+
+// TestImports_PathRejectsControlCharacters checks the lint-side half of the
+// injection defence: a path holding a newline or any other control character is
+// not a path, and saying so keeps it out of the renderer and out of this
+// diagnostic's own line-wise output.
+func TestImports_PathRejectsControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	src := importer([]string{`{scope: payments, path: "./pay\n## Injected\nments.modelith.yaml"}`}, "payments.PaymentMethod")
+	res, err := Run(importerPath, []byte(src), fakeFiles{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFindings(t, importFindings(res.Findings), []wantFinding{{
+		SeverityError, CategorySemantic, "/imports/0",
+		`import path "./pay\n## Injected\nments.modelith.yaml" contains a control character at byte 5`,
+	}})
+	for _, f := range res.Findings {
+		if strings.ContainsAny(f.Message, "\n\r") {
+			t.Errorf("a diagnostic must stay on one line, got %q", f.Message)
+		}
+	}
+}
+
+// TestImports_UnresolvedScopeReportedOnce checks that one missing import is one
+// finding however many attributes reference it, and that an import which is
+// listed but failed to load does not also make every reference site look like a
+// reference to nothing.
+func TestImports_UnresolvedScopeReportedOnce(t *testing.T) {
+	t.Parallel()
+
+	// Six attributes, all naming the same unbound scope.
+	var b strings.Builder
+	b.WriteString("kind: DomainModel\nversion: v1\nentities:\n  Visit:\n    definition: One stay.\n    attributes:\n")
+	for i := 0; i < 6; i++ {
+		fmt.Fprintf(&b, "      - name: a%d\n        type: shipping.Carrier\n", i)
+	}
+	res, err := Run(importerPath, []byte(b.String()), fakeFiles{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFindings(t, importFindings(res.Findings), []wantFinding{{
+		SeverityError, CategorySemantic, "/entities/Visit/attributes/0/type",
+		`references the scope "shipping", which no import binds — add the model that defines Carrier to ` +
+			"`imports:` (6 attribute types reference this scope; this is the first)",
+	}})
+
+	t.Run("an import that failed to load speaks for its own scope", func(t *testing.T) {
+		t.Parallel()
+		src := importer([]string{`"./typo.modelith.yaml"`}, "typo.PaymentMethod")
+		res, err := Run(importerPath, []byte(src), fakeFiles{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFindings(t, importFindings(res.Findings), []wantFinding{{
+			SeverityError, CategorySemantic, "/imports/0", "cannot be read",
+		}})
+	})
+}
+
+// TestImports_DuplicateScopeSurvivesAnUnreadableBinder checks that the second
+// entry's own trouble does not mask the duplicate binding: fixing the path would
+// otherwise surface a second, unrelated failure.
+func TestImports_DuplicateScopeSurvivesAnUnreadableBinder(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{"docs/payments.modelith.yaml": paymentsModel}
+	src := importer(
+		[]string{`"./payments.modelith.yaml"`, "{scope: payments, path: ./gone.modelith.yaml}"},
+		"payments.PaymentMethod",
+	)
+	res, err := Run(importerPath, []byte(src), files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFindings(t, importFindings(res.Findings), []wantFinding{{
+		SeverityError, CategorySemantic, "/imports/1",
+		`binds scope "payments", which import "./payments.modelith.yaml" already binds`,
+	}})
+}
+
+// TestImports_UnsupportedVersionInAnImportedModel checks that an imported file
+// is held to the versions this binary understands, not just to its kind.
+func TestImports_UnsupportedVersionInAnImportedModel(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{
+		"docs/payments.modelith.yaml": strings.Replace(paymentsModel, "version: v1", "version: v99", 1),
+	}
+	src := importer([]string{`"./payments.modelith.yaml"`}, "payments.PaymentMethod")
+	res, err := Run(importerPath, []byte(src), files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFindings(t, importFindings(res.Findings), []wantFinding{{
+		SeverityError, CategorySemantic, "/imports/0",
+		`import "./payments.modelith.yaml" declares schema version "v99", which this modelith does not support: v1`,
+	}})
+}
+
+// TestImports_SkippedWhenTheSchemaRejectedTheDocument checks that a scope the
+// schema already rejected never binds. Advising a fix in terms of a scope that
+// cannot exist — "reference it as .Name" — is worse than saying nothing.
+func TestImports_SkippedWhenTheSchemaRejectedTheDocument(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{"docs/payments.modelith.yaml": paymentsModel}
+	for _, scope := range []string{`""`, "Payments", "pay.ments"} {
+		t.Run(scope, func(t *testing.T) {
+			t.Parallel()
+			src := importer([]string{"{scope: " + scope + ", path: ./payments.modelith.yaml}"}, "payments.PaymentMethod")
+			res, err := Run(importerPath, []byte(src), files)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !findingWithMessage(res.Findings, "does not match pattern") {
+				t.Fatalf("expected the schema to reject the scope, got: %+v", res.Findings)
+			}
+			for _, f := range res.Findings {
+				if f.Category != CategoryStructural && strings.HasPrefix(f.Path, "/imports/") {
+					t.Errorf("imports must not resolve against a rejected document, got %+v", f)
+				}
+			}
+		})
+	}
+}
+
+// TestImports_SingleCharacterScope pins the one definition of a scope slug: a
+// one-character scope is legal, so "a.modelith.yaml" can be imported bare. The
+// schema, the linter and the reference pattern all read it from
+// model.ScopeSlug, so they cannot disagree about the minimum length.
+func TestImports_SingleCharacterScope(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{"docs/a.modelith.yaml": paymentsModel}
+	res, err := Run(importerPath, []byte(importer([]string{`"./a.modelith.yaml"`}, "a.PaymentMethod")), files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFindings(t, importFindings(res.Findings), nil)
+}
+
 // TestADR_0012_ImporterBindsScope pins that the scope belongs to the importing
 // model: the same file resolves under whatever scope each importer binds it to,
 // and a model has no say in — and no field for — what it is called elsewhere.

@@ -93,7 +93,7 @@
         "scope": {
           "description": "The slug this model writes before an item's name to reference it (\"payments\" in \"payments.PaymentMethod\"). Lowercase kebab-case. Local to this model: the imported file does not declare it, and another model may bind the same file to a different scope.",
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]+$"
+          "pattern": "^[a-z][a-z0-9-]*$"
         },
         "path": {
           "description": "Path to the model file, relative to this one.",

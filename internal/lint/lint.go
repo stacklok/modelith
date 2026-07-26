@@ -109,7 +109,13 @@ func Run(path string, src []byte, fr FileReader) (*Result, error) {
 	}
 
 	runSemantic(m, res)
-	runImports(path, m, fr, res)
+	// Imports resolve only against a document the schema accepted. A scope the
+	// schema already rejected would otherwise bind anyway, and the advice that
+	// follows would tell the author to write syntax that cannot work — the same
+	// reason the version check gates schema validation.
+	if structuralOK {
+		runImports(path, m, fr, res)
+	}
 	runRelationshipShape(m, res)
 	runSubtypes(m, res)
 	runReciprocity(m, res)

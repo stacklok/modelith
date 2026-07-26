@@ -38,6 +38,12 @@ type Model struct {
 	Invariants []Invariant `json:"invariants,omitempty"`
 }
 
+// ScopeSlug is the one definition of a valid import scope, as an unanchored
+// regexp source so callers can embed it in a larger pattern ("scope.Name").
+// The schema's `scope` pattern is this anchored, and
+// TestInvariant_ScopeSlugMatchesSchema guards the two against drift.
+const ScopeSlug = `[a-z][a-z0-9-]*`
+
 // Import is another model file this one references, bound to the scope written
 // before an imported item's name ("payments.PaymentMethod"). The binding is the
 // importer's: the imported file says nothing about how it is named here, so two

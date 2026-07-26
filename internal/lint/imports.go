@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"unicode"
 
 	"github.com/stacklok/modelith/internal/model"
+	"github.com/stacklok/modelith/internal/schema"
 )
 
 // FileReader reads an imported model file by path. It is the seam that keeps
@@ -25,14 +28,14 @@ type OSFiles struct{}
 func (OSFiles) ReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
 
 var (
-	// qualifiedRefRE matches a cross-model reference, "scope.Name". The scope
-	// side mirrors the schema's scope pattern; the name side stays loose so a
-	// reference to something that isn't a defined enum is reported as a broken
-	// reference rather than silently read as a primitive type.
-	qualifiedRefRE = regexp.MustCompile(`^([a-z][a-z0-9-]*)\.([A-Za-z0-9]+)$`)
+	// qualifiedRefRE matches a well-formed cross-model reference, "scope.Name":
+	// exactly one dot, a scope slug before it, a PascalCase item name after.
+	// Anything else containing a dot is a malformed reference, not a primitive
+	// type — malformedRefReason says which way it is malformed.
+	qualifiedRefRE = regexp.MustCompile(`^(` + model.ScopeSlug + `)\.([A-Z][A-Za-z0-9]*)$`)
 	// scopeRE is the slug a bare import's filename has to yield. An explicitly
 	// written scope is held to the same pattern by the schema.
-	scopeRE = regexp.MustCompile(`^[a-z][a-z0-9-]+$`)
+	scopeRE = regexp.MustCompile(`^` + model.ScopeSlug + `$`)
 )
 
 // importedModel is one successfully resolved entry of a model's imports list.
@@ -48,8 +51,8 @@ type importedModel struct {
 // modelPath is the path of the model being linted; imports resolve relative to
 // its directory.
 func runImports(modelPath string, m *model.Model, fr FileReader, res *Result) {
-	byScope := loadImports(modelPath, m, fr, res)
-	used := checkQualifiedTypes(m, byScope, res)
+	byScope, claimed := loadImports(modelPath, m, fr, res)
+	used := checkQualifiedTypes(m, byScope, claimed, res)
 	// An unreferenced import is a completeness finding, alongside the unused
 	// enum and the unused glossary term: vocabulary the model declares and
 	// nothing uses. Sharing their category means sharing their promotion under
@@ -72,11 +75,13 @@ func runImports(modelPath string, m *model.Model, fr FileReader, res *Result) {
 }
 
 // loadImports reads each declared import and returns the ones that resolved,
-// keyed by the scope the importing model binds them to. Every rejection is
-// reported as an error: an import that cannot be resolved is a broken
-// reference, not a gap.
-func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) map[string]importedModel {
-	byScope := map[string]importedModel{}
+// keyed by the scope the importing model binds them to, plus every scope the
+// list claimed at all — including entries that then failed to load — mapped to
+// the path of the first entry that claimed it. Every rejection is reported as an
+// error: an import that cannot be resolved is a broken reference, not a gap.
+func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) (byScope map[string]importedModel, claimed map[string]string) {
+	byScope = map[string]importedModel{}
+	claimed = map[string]string{}
 	dir := filepath.Dir(modelPath)
 	for i, imp := range m.Imports {
 		reject := func(format string, args ...any) {
@@ -90,16 +95,40 @@ func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) m
 		if imp.Path == "" {
 			continue // the schema's minLength reports the empty path
 		}
-		if filepath.IsAbs(imp.Path) || imp.Path[0] == '/' {
-			reject("import %q is an absolute path — imports are relative to this model so they resolve in any checkout", imp.Path)
+		// The scope is settled before the path is judged, and claimed before the
+		// file is opened. Reference sites depend on the scope alone, so an entry
+		// that names a usable one holds it whatever else is wrong with the entry:
+		// a duplicate binding is then reported on its own terms instead of being
+		// pre-empted by the second entry's unrelated trouble, and a broken path
+		// does not also make every "scope.Name" that names it look like a
+		// reference to nothing. A written scope is held to the pattern by the
+		// schema; a derived one the schema never sees.
+		scopeOK := !imp.ScopeFromPath || scopeRE.MatchString(imp.Scope)
+		if scopeOK {
+			if prev, dup := claimed[imp.Scope]; dup {
+				reject("import %q binds scope %q, which import %q already binds — give one of them an explicit, different scope so %s.Name resolves unambiguously",
+					imp.Path, imp.Scope, prev, imp.Scope)
+				continue
+			}
+			claimed[imp.Scope] = imp.Path
+		}
+		// A control character is never part of a filename, and one that reached
+		// here would be carried into this diagnostic, the shell, and the rendered
+		// Markdown. Every message here quotes the path with %q, so an escape
+		// survives as text rather than as a line break in the output.
+		if at := strings.IndexFunc(imp.Path, unicode.IsControl); at >= 0 {
+			reject("import path %q contains a control character at byte %d — a filename cannot contain one; check for a stray newline or escape in the YAML", imp.Path, at)
 			continue
 		}
-		// A written scope is held to the pattern by the schema; a derived one the
-		// schema never sees, and a filename that yields no usable slug is the
-		// case the explicit form exists for.
-		if imp.ScopeFromPath && !scopeRE.MatchString(imp.Scope) {
-			reject("import %q binds the scope %q taken from its filename, which is not a valid slug (lowercase kebab-case) — name the scope explicitly instead: `- {scope: <slug>, path: %s}`",
+		if !scopeOK {
+			// A filename that yields no usable slug is the case the explicit form
+			// exists for.
+			reject("import %q binds the scope %q taken from its filename, which is not a valid slug (lowercase kebab-case) — name the scope explicitly instead: `- {scope: <slug>, path: %q}`",
 				imp.Path, imp.Scope, imp.Path)
+			continue
+		}
+		if filepath.IsAbs(imp.Path) || imp.Path[0] == '/' {
+			reject("import %q is an absolute path — imports are relative to this model so they resolve in any checkout", imp.Path)
 			continue
 		}
 		data, err := fr.ReadFile(filepath.Join(dir, imp.Path))
@@ -112,14 +141,14 @@ func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) m
 			reject("import %q is not a domain model — lint it on its own with `modelith lint` to see why", imp.Path)
 			continue
 		}
-		if prev, ok := byScope[imp.Scope]; ok {
-			reject("import %q binds scope %q, which import %q already binds — give one of them an explicit, different scope so %s.Name resolves unambiguously",
-				imp.Path, imp.Scope, prev.path, imp.Scope)
+		if !schema.Supported(im.Version) {
+			reject("import %q declares schema version %q, which this modelith does not support: %s (upgrade modelith, or move that model to a supported version)",
+				imp.Path, im.Version, strings.Join(schema.SupportedVersions(), ", "))
 			continue
 		}
 		byScope[imp.Scope] = importedModel{index: i, path: imp.Path, model: im}
 	}
-	return byScope
+	return byScope, claimed
 }
 
 // checkQualifiedTypes resolves every qualified attribute type against the
@@ -129,15 +158,18 @@ func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) m
 // PascalCase type that names no enum is only a warning (runSemantic). The
 // asymmetry is deliberate: an unqualified name may be a primitive the author
 // invented, while "scope.Name" can only be a cross-model reference.
-func checkQualifiedTypes(m *model.Model, byScope map[string]importedModel, res *Result) map[string]bool {
+func checkQualifiedTypes(m *model.Model, byScope map[string]importedModel, claimed map[string]string, res *Result) map[string]bool {
 	used := map[string]bool{}
+	unbound := map[string]*unboundScope{}
 	for _, name := range m.EntityNames() {
 		for i, attr := range m.Entities[name].Attributes {
-			match := qualifiedRefRE.FindStringSubmatch(attr.Type)
-			if match == nil {
+			// A dot in a type can only be a cross-model reference: primitives are
+			// lowercase words and enum names are PascalCase, neither of which
+			// carries one. So a dotted type that is not well formed is a typo to
+			// report, not a type to pass over.
+			if !strings.Contains(attr.Type, ".") {
 				continue
 			}
-			scope, item := match[1], match[2]
 			path := fmt.Sprintf("/entities/%s/attributes/%d/type", name, i)
 			broken := func(format string, args ...any) {
 				res.Findings = append(res.Findings, Finding{
@@ -147,9 +179,34 @@ func checkQualifiedTypes(m *model.Model, byScope map[string]importedModel, res *
 					Message:  fmt.Sprintf(format, args...),
 				})
 			}
+			match := qualifiedRefRE.FindStringSubmatch(attr.Type)
+			if match == nil {
+				broken("attribute type %q is a malformed cross-model reference (%s) — write it as scope.Name: one dot, a lowercase kebab-case scope, a PascalCase item name",
+					attr.Type, malformedRefReason(attr.Type))
+				// The scope the author was reaching for is still referenced, so a
+				// typo in the item name does not also read as an unused import.
+				if head, _, _ := strings.Cut(attr.Type, "."); byScope[head].model != nil {
+					used[head] = true
+				}
+				continue
+			}
+			scope, item := match[1], match[2]
 			imp, ok := byScope[scope]
 			if !ok {
-				broken("attribute type %q references the scope %q, which no import binds — add the model that defines %s to `imports:`", attr.Type, scope, item)
+				if _, listed := claimed[scope]; listed {
+					// An import claims this scope but failed to load, and that
+					// failure is already reported against the imports list. It is
+					// the one thing to fix; saying the scope is unbound here would
+					// report the same mistake again at every reference site.
+					used[scope] = true
+					continue
+				}
+				u, seen := unbound[scope]
+				if !seen {
+					unbound[scope] = &unboundScope{path: path, typ: attr.Type, item: item, count: 1}
+					continue
+				}
+				u.count++
 				continue
 			}
 			// The import is referenced even when the item does not resolve, so
@@ -165,7 +222,52 @@ func checkQualifiedTypes(m *model.Model, byScope map[string]importedModel, res *
 			broken("attribute type %q names no enum %q in %q — an imported model's own imports are not reachable from here", attr.Type, item, imp.path)
 		}
 	}
+	reportUnboundScopes(unbound, res)
 	return used
+}
+
+// unboundScope accumulates the references to one scope no import binds, so a
+// single missing import is reported once rather than once per reference site.
+type unboundScope struct {
+	path  string // where the first reference is
+	typ   string // the first reference, verbatim
+	item  string
+	count int
+}
+
+func reportUnboundScopes(unbound map[string]*unboundScope, res *Result) {
+	for _, scope := range sortedMapKeys(unbound) {
+		u := unbound[scope]
+		msg := fmt.Sprintf("attribute type %q references the scope %q, which no import binds — add the model that defines %s to `imports:`", u.typ, scope, u.item)
+		if u.count > 1 {
+			msg += fmt.Sprintf(" (%d attribute types reference this scope; this is the first)", u.count)
+		}
+		res.Findings = append(res.Findings, Finding{
+			Severity: SeverityError,
+			Category: CategorySemantic,
+			Path:     u.path,
+			Message:  msg,
+		})
+	}
+}
+
+// malformedRefReason names what is wrong with a type that contains a dot but is
+// not a well-formed "scope.Name", so the diagnostic points at the fix instead of
+// only restating the shape.
+func malformedRefReason(typ string) string {
+	scope, item, _ := strings.Cut(typ, ".")
+	switch {
+	case scope == "":
+		return "nothing before the dot"
+	case item == "":
+		return "nothing after the dot"
+	case strings.Contains(item, "."):
+		return "more than one dot"
+	case !scopeRE.MatchString(scope):
+		return fmt.Sprintf("the scope %q is not lowercase kebab-case", scope)
+	default:
+		return fmt.Sprintf("the item name %q is not PascalCase", item)
+	}
 }
 
 // reportQualifiedEntityRefs reports a cross-model reference in an entity

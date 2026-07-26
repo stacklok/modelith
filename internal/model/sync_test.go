@@ -95,3 +95,24 @@ func sortedKeys(m map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// TestInvariant_ScopeSlugMatchesSchema guards the one definition of an import
+// scope. Three places used to carry their own pattern and disagreed on the
+// minimum length, so a one-character filename could not be imported bare. The
+// linter and the renderer build theirs from ScopeSlug; the schema's copy is
+// hand-written JSON, so it is checked here.
+func TestInvariant_ScopeSlugMatchesSchema(t *testing.T) {
+	var root map[string]any
+	if err := json.Unmarshal(schema.JSON(), &root); err != nil {
+		t.Fatal(err)
+	}
+	defs, _ := root["$defs"].(map[string]any)
+	obj, _ := defs["importObject"].(map[string]any)
+	props, _ := obj["properties"].(map[string]any)
+	scope, _ := props["scope"].(map[string]any)
+	got, _ := scope["pattern"].(string)
+
+	if want := "^" + ScopeSlug + "$"; got != want {
+		t.Errorf("schema importObject.scope pattern is %q, want %q (from model.ScopeSlug)", got, want)
+	}
+}

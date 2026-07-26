@@ -181,8 +181,8 @@ func TestRenderImports_SectionAndLinkedTypes(t *testing.T) {
 
 	for _, want := range []string{
 		"## Imports\n",
-		"- **`payments`** — [`../payments/payments.modelith.yaml`](../payments/payments.modelith.md)\n",
-		"- **`billing`** — [`./legacy/pay-v2.modelith.yaml`](./legacy/pay-v2.modelith.md)\n",
+		"- **`payments`** — [../payments/payments.modelith.yaml](../payments/payments.modelith.md)\n",
+		"- **`billing`** — [./legacy/pay-v2.modelith.yaml](./legacy/pay-v2.modelith.md)\n",
 		"| `paidWith` | [payments.PaymentMethod](../payments/payments.modelith.md#paymentmethod) |  |\n",
 		"| `plan` | [billing.Plan](./legacy/pay-v2.modelith.md#plan) |  |\n",
 		// A scope no import binds is a lint error; the renderer states it rather
@@ -197,6 +197,94 @@ func TestRenderImports_SectionAndLinkedTypes(t *testing.T) {
 
 	if strings.Contains(Render(&model.Model{Entities: m.Entities}), "## Imports") {
 		t.Error("did not expect an Imports section when there are no imports")
+	}
+}
+
+// TestRenderImports_HostilePathCannotEscapeItsMarkup pins that an import path —
+// author-supplied text that reaches a published page — is escaped for the exact
+// position it lands in. A path is not validated by the schema beyond a minimum
+// length, so the renderer has to be safe on its own; the linter's rejection of
+// control characters is defence in depth, not the barrier.
+func TestRenderImports_HostilePathCannotEscapeItsMarkup(t *testing.T) {
+	t.Parallel()
+
+	// Closes the link destination, then opens an image and a second link.
+	const breakout = `./p.modelith.yaml) <img src=x onerror=alert(1)> [click me](#`
+
+	m := &model.Model{
+		Imports: []model.Import{
+			{Scope: "payments", Path: breakout},
+			{Scope: "piped", Path: "./a|b.modelith.yaml"},
+			{Scope: "spaced", Path: "./a b.modelith.yaml"},
+			// A newline would inject a heading into the Imports list; the derived
+			// scope carries it too, since it comes from the same string.
+			{Scope: "line\nbreak", Path: "./a\n## Injected\n\nb.modelith.yaml", ScopeFromPath: true},
+			{Scope: "ticked", Path: "./a`b``c.modelith.yaml"},
+		},
+		Entities: map[string]model.Entity{
+			"Ticket": {
+				Definition: "A stub.",
+				Attributes: []model.Attribute{{Name: "paidWith", Type: "payments.PaymentMethod"}},
+			},
+		},
+	}
+	got := Render(m)
+
+	for _, want := range []string{
+		// The label is backslash-escaped plain text, so nothing in it opens a
+		// tag or closes the label early.
+		`- **` + "`payments`" + `** — [./p.modelith.yaml\) \<img src=x onerror=alert\(1\)\> \[click me\]\(\#](./p.modelith.yaml%29%20%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E%20%5Bclick%20me%5D%28%23.md)` + "\n",
+		// A pipe survives in the destination as %7C rather than being escaped
+		// for a table cell it is not in.
+		"[./a\\|b.modelith.yaml](./a%7Cb.modelith.md)\n",
+		"[./a b.modelith.yaml](./a%20b.modelith.md)\n",
+		// Every control character is replaced before the value is written.
+		"- **`line break`** — [./a \\#\\# Injected  b.modelith.yaml](./a%0A%23%23%20Injected%0A%0Ab.modelith.md)\n",
+		"[./a\\`b\\`\\`c.modelith.yaml](./a%60b%60%60c.modelith.md)\n",
+		// The deep link is assembled from escaped parts: escaping the finished
+		// link instead would put a backslash inside the destination.
+		"| `paidWith` | [payments.PaymentMethod](./p.modelith.yaml%29%20%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E%20%5Bclick%20me%5D%28%23.md#paymentmethod) |  |\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in:\n%s", want, got)
+		}
+	}
+
+	// Every occurrence of a breakout token is a backslash-escaped one.
+	for _, tok := range []string{"<img", "[click me]"} {
+		if strings.Count(got, tok) != strings.Count(got, `\`+tok) {
+			t.Errorf("an unescaped %q survived in the imports section:\n%s", tok, got)
+		}
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "#") && strings.Contains(line, "Injected") {
+			t.Errorf("a path injected the heading %q:\n%s", line, got)
+		}
+	}
+	// The Imports section is one list: a value that broke out would end it.
+	if n := strings.Count(got, "\n- **"); n != len(m.Imports) {
+		t.Errorf("expected %d import bullets, got %d:\n%s", len(m.Imports), n, got)
+	}
+}
+
+// TestCodeSpan_FencesAroundBackticks checks the CommonMark rule the imports
+// section leans on: a span's fence is longer than any backtick run inside it, so
+// a value holding backticks stays intact instead of closing the span early.
+func TestCodeSpan_FencesAroundBackticks(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ in, want string }{
+		{"payments", "`payments`"},
+		{"a`b", "``a`b``"},
+		{"a``b`c", "```a``b`c```"},
+		{"`edge`", "`` `edge` ``"},
+		{"a\nb", "`a b`"},
+		{"", "` `"},
+	}
+	for _, tc := range cases {
+		if got := codeSpan(tc.in); got != tc.want {
+			t.Errorf("codeSpan(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

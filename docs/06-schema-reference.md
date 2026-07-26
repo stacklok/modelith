@@ -297,16 +297,21 @@ imports:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `scope` | string | yes (explicit form) | The slug written before an item's name. Lowercase kebab-case (`^[a-z][a-z0-9-]+$`). |
-| `path` | string | yes (explicit form) | Path to the model file, relative to *this* one. |
+| `scope` | string | yes (explicit form) | The slug written before an item's name. Lowercase kebab-case (`^[a-z][a-z0-9-]*$`). |
+| `path` | string | yes (explicit form) | Path to the model file, relative to *this* one. Relative, and free of control characters. |
 
 A bare string is the same thing with the scope derived — `./x.modelith.yaml` is
 exactly `{scope: x, path: ./x.modelith.yaml}`. If the filename doesn't yield a
 valid slug (`./Pay Ments.yaml`), the linter says so and points at the explicit
 form.
 
-Four rules are worth knowing before you use this:
+Five rules are worth knowing before you use this:
 
+- **A dot means a cross-model reference.** An attribute `type` containing one
+  has to be exactly `scope.Name` — one dot, a slug before it, a PascalCase item
+  name after. `payments.v2.PaymentMethod`, `.PaymentMethod` and `payments.` are
+  errors that say which way they are malformed, not types quietly read as
+  primitives.
 - **The binding is local.** Two models may import the same file under different
   scopes, and neither one's choice is visible to the other. Two imports binding
   the *same* scope in one model is an error — give one of them an explicit,
