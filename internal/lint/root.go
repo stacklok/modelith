@@ -21,15 +21,21 @@ const maxSymlinkHops = 40
 // linked worktree and in a submodule it is a regular file holding a gitdir
 // pointer, and reading that as "no repository" would confine resolution to a
 // single directory in every such checkout.
+//
+// The walk climbs the resolved directory, not the one as written. A model
+// reached through a symlinked directory belongs to the tree it really sits in,
+// and every candidate import is judged after the same resolution, so seeding
+// the walk with the unresolved path would compare the two against different
+// trees.
 func resolutionRoot(modelPath string) (root string, inRepo bool) {
-	dir := absolute(filepath.Dir(modelPath))
+	dir := realPath(absolute(filepath.Dir(modelPath)))
 	for cur := dir; ; {
 		if _, err := os.Lstat(filepath.Join(cur, ".git")); err == nil {
-			return realPath(cur), true
+			return cur, true
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
-			return realPath(dir), false
+			return dir, false
 		}
 		cur = parent
 	}

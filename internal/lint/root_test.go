@@ -18,6 +18,9 @@ import (
 //	<base>/outside/
 //	<base>/wt/              .git as a regular file, the linked-worktree shape
 //	<base>/loose/{a,ab,b}/  no repository anywhere above
+//	<base>/outer/           .git as a directory
+//	<base>/outer/work       link -> <base>/inner/models, a directory in another repository
+//	<base>/inner/           .git as a directory
 func m5Tree(t *testing.T) string {
 	t.Helper()
 
@@ -38,23 +41,30 @@ func m5Tree(t *testing.T) string {
 		cur = parent
 	}
 
-	for _, dir := range []string{"repo/docs", "repo-evil", "outside", "wt/docs", "loose/a", "loose/ab", "loose/b"} {
+	for _, dir := range []string{"repo/docs", "repo-evil", "outside", "wt/docs", "loose/a", "loose/ab", "loose/b", "outer", "inner/models"} {
 		if err := os.MkdirAll(filepath.Join(base, dir), 0o750); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// A repository marked by a directory, and one marked by the regular file a
 	// linked worktree and a submodule leave behind.
-	if err := os.Mkdir(filepath.Join(base, "repo", ".git"), 0o750); err != nil {
-		t.Fatal(err)
+	for _, dir := range []string{"repo", "outer", "inner"} {
+		if err := os.Mkdir(filepath.Join(base, dir, ".git"), 0o750); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(base, "wt", ".git"), []byte("gitdir: /elsewhere/.git/worktrees/wt\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{"repo", "repo/docs", "repo-evil", "outside", "wt", "loose/a", "loose/ab", "loose/b"} {
+	for _, dir := range []string{"repo", "repo/docs", "repo-evil", "outside", "wt", "loose/a", "loose/ab", "loose/b", "inner/models"} {
 		if err := os.WriteFile(filepath.Join(base, dir, "p.modelith.yaml"), []byte(paymentsModel), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A directory in one repository reached through a link in another, so a
+	// root taken from the path as written comes from the wrong tree.
+	if err := os.Symlink(filepath.Join(base, "inner", "models"), filepath.Join(base, "outer", "work")); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(base, "outside", "p.modelith.yaml"), filepath.Join(base, "repo/docs", "link.modelith.yaml")); err != nil {
 		t.Fatal(err)
@@ -139,6 +149,24 @@ func TestADR_0013_ImportsConfinedToTheRepository(t *testing.T) {
 			entry:    "{scope: p, path: ../../repo-evil/p.modelith.yaml}",
 			resolved: "repo-evil/p.modelith.yaml",
 			root:     "repo",
+			inRepo:   true,
+		},
+		{
+			// The root comes from the tree the model really sits in. Climbing
+			// the path as written finds <base>/outer, which holds neither the
+			// model nor its peer, and refuses a file in the same directory.
+			name:  "model reached through a symlinked directory",
+			dir:   "outer/work",
+			entry: "{scope: p, path: ./p.modelith.yaml}",
+		},
+		{
+			// The boundary still holds from there, and names the real tree's
+			// root rather than the one the link was written under.
+			name:     "escaping from a symlinked directory",
+			dir:      "outer/work",
+			entry:    "{scope: p, path: ../../outside/p.modelith.yaml}",
+			resolved: "outside/p.modelith.yaml",
+			root:     "inner",
 			inRepo:   true,
 		},
 		{
