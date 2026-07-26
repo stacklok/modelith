@@ -31,6 +31,8 @@ the schema). Print the schema any time with `modelith schema`.
 | `version` | string | yes | Schema revision. Currently `v1`. |
 | `title` | string | no | Heading used when rendering. |
 | `description` | string | no | One-paragraph summary. |
+| `scope` | string | no | Kebab-case slug naming this model where another model references its items. Needed only to *be* imported. See [Imports](#imports). |
+| `imports` | list | no | Paths to other model files whose items this one references, relative to this file. See [Imports](#imports). |
 | `glossary` | map | no | Ubiquitous-language terms that aren't entities. See [Glossary](#glossary). |
 | `enums` | map | no | First-class enumerated types. See [Enum](#enum). |
 | `entities` | map | no | Keyed by canonical PascalCase entity name. If present, must contain at least one entity. |
@@ -256,6 +258,78 @@ A scenario is a diagnostic, not a backlog item: it tests whether the entities
 and actions actually hang together. If writing one reveals an invariant that
 can't be satisfied — or that doesn't exist yet — fix the model, not the scenario.
 
+## Imports
+
+Once a system outgrows one model, two models end up needing the same concept —
+typically a shared enum. Defining it in both and asserting in prose that they
+match leaves nothing to check, and they drift. Instead, one model owns the
+definition and the other **references** it.
+
+The referenced model declares a slug:
+
+```yaml
+# payments.modelith.yaml
+kind: DomainModel
+version: v1
+scope: payments
+enums:
+  PaymentMethod:
+    values:
+      - name: card
+      - name: transfer
+```
+
+The referencing model lists a path to it and writes `scope.Name` at the
+reference site:
+
+```yaml
+# garage.modelith.yaml
+kind: DomainModel
+version: v1
+imports:
+  - ./payments.modelith.yaml
+entities:
+  Visit:
+    definition: One car's stay in the garage.
+    attributes:
+      - name: settledWith
+        type: payments.PaymentMethod
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `scope` | string | no | Lowercase kebab-case slug (`^[a-z][a-z0-9-]+$`). Optional — a model nobody imports never needs one — but required in order to be imported. |
+| `imports` | list of string | no | Paths to model files, each relative to *this* file. `..` is fine; an absolute path is an error, since it wouldn't resolve in another checkout. |
+
+Four rules are worth knowing before you use this:
+
+- **The slug is declared once, by the imported model.** An importing model
+  lists a path, never a slug, so there is nothing for the two files to disagree
+  about. Two imports declaring the same `scope` is an error — rename one.
+- **Resolution does not recurse.** Only items defined *directly* in a listed
+  file are reachable. If `garage` imports `payments` and `payments` imports
+  `shipping`, `shipping.Carrier` is not available in `garage` — import it
+  there too. Mutual imports (`a` lists `b`, `b` lists `a`) are therefore legal
+  and terminate.
+- **Only an attribute `type` may be qualified.** Cross-model references in
+  `relationship.entity` and `subtypeOf` are not supported; the linter says so
+  plainly rather than letting the name-pattern rejection speak for it. Whether
+  the ER diagram should draw a foreign entity — and how reciprocity would work
+  across a boundary — has no answer yet, and no live model needs one.
+- **Nothing is fetched.** `imports` names files that are already in your
+  repository; `lint` and `render` never touch the network
+  ([ADR-0011](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0011-network-boundary.md)).
+
+The linter reports a qualified type that doesn't resolve as an **error**, while
+an *unqualified* PascalCase type that names no enum is only a **warning**. The
+asymmetry is deliberate: `PaymentMethod` might be a primitive the author
+invented, so the linter can only suggest; `payments.PaymentMethod` can be
+nothing but a cross-model reference, so failing to resolve it is a broken
+reference.
+
+The full rationale, including where this is heading, is
+[ADR-0010](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0010-cross-model-references-by-vendoring.md).
+
 ## What this format deliberately leaves out
 
 modelith is a light, agent-authored subset of domain-driven design, not a full
@@ -277,9 +351,11 @@ is *not* here is as useful as knowing what is.
   while invariants govern the legal transitions between them. Deliberate, and
   consistent with why enums carry no transition edges.
 - **Bounded contexts and context maps.** One model is one context. There is no
-  construct for relating multiple contexts or mapping shared concepts across
-  them. Compose several `*.modelith.yaml` models at the repository level instead
-  of expressing context boundaries inside one file.
+  construct for declaring a context boundary or mapping a concept from one
+  context onto another's. What there is, is a narrow reference:
+  [imports](#imports) let one model name an item another defines, so shared
+  vocabulary has one definition. Everything else about how two contexts relate
+  stays outside the format.
 
 These omissions keep the format small enough for an agent to author reliably and
 for a human to read in one sitting. Any of them can become a roadmap item if a
@@ -299,7 +375,12 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
     - a duplicate invariant `id` (across entity-level *and* model-level
       invariants — they share one namespace);
     - a scenario `invariants_touched` or an action `preserves` that references an
-      invariant id no entity or model-level invariant declares.
+      invariant id no entity or model-level invariant declares;
+    - an [import](#imports) that is absolute, unreadable, not a domain model,
+      declares no `scope`, or declares a `scope` another import already
+      declared;
+    - a qualified attribute `type` whose scope isn't imported, or that names
+      no enum in the model it resolves to.
   - **Warnings** (likely-but-not-certainly wrong):
     - a backticked term in freeform text that resolves to no entity, glossary
       term, role, or actor;
@@ -312,7 +393,9 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
       the other declares it back, so which is the reciprocal of which can't be
       determined — the diagram draws every declaration as its own line;
     - an attribute `type` that looks like an enum reference (PascalCase) but
-      names no defined enum;
+      names no defined enum — a *warning* where the qualified `scope.Name` form
+      is an error, for the reason given under [Imports](#imports);
+    - an [import](#imports) nothing references;
     - an action `actor` that is neither a defined entity nor a glossary term.
 - **Completeness** checks (advisory warnings): entities with no invariants;
   entities no scenario exercises; a glossary term nothing references; an enum no
