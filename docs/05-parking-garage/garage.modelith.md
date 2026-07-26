@@ -4,6 +4,12 @@
 
 Tracks the state of a single parking garage: its spots, the cars that occupy them, and the two ways a car enters — a monthly parker's keycard or a temporary visitor's pay-on-exit ticket.
 
+## Imports
+
+Items defined in these models are referenced below as `scope.Name`.
+
+- **`payments`** — [`./payments.modelith.yaml`](./payments.modelith.md)
+
 ## Glossary
 
 - **`Driver`** — A person who enters and exits using a monthly `Account`'s `Keycard`. The human behind a `Car`; not modeled as an entity.
@@ -178,6 +184,7 @@ A temporary entry credential issued at the gate to a visitor with no `Account`. 
 | `issuedAt` | timestamp |  |
 | `amountDue` | integer | Fee owed, in the smallest currency unit. _Derived:_ Computed at payment time from the parking duration (issue time to now) and the `Garage`'s rate schedule. |
 | `paidAt` | timestamp | When the `Ticket` was paid; unset until then. |
+| `paidWith` | [payments.PaymentMethod](./payments.modelith.md#paymentmethod) | How the fee was settled at the `Kiosk`; unset until paid. The garage does not define what a payment method is — the payments model does. |
 | `paid` | boolean | _Derived:_ True once `paidAt` is set. |
 
 **Actions**

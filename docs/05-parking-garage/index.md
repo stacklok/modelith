@@ -231,3 +231,60 @@ the source.
 - **[View the full source YAML →](https://github.com/stacklok/modelith/blob/main/docs/05-parking-garage/garage.modelith.yaml)**
 
 Want to try it yourself? See [Authoring with Agents](../02-getting-started.md).
+
+## Advanced: borrowing a concept from another model
+
+:::note[Advanced]
+
+Skip this until you have two models. One model is the normal case, and
+everything above works without it.
+
+:::
+
+Late in the session, one more concept turned up — and it did **not** belong to
+the garage:
+
+> **You:** The kiosk takes card or cash. Add a payment method to the ticket.
+>
+> **Agent:** Happy to, but a payment method isn't a parking concept — it's the
+> same list your billing system already has, and the moment both models define
+> it, they start to drift. Is there another model that owns money?
+
+> **You:** There's a small payments model, yes.
+
+Rather than a second copy of the same list, the garage **references** the one in
+the payments model. The payments model needs no changes at all — it doesn't know
+it is being referenced:
+
+```yaml
+# payments.modelith.yaml — an ordinary model that happens to define the enum
+enums:
+  PaymentMethod:
+    values:
+      - name: card
+      - name: cash
+      - name: account
+```
+
+The garage lists the file and writes `scope.Name` at the reference site. The
+scope comes from the filename, so `./payments.modelith.yaml` is written
+`payments.`:
+
+```yaml
+# garage.modelith.yaml
+imports:
+  - ./payments.modelith.yaml
+
+# ... in Ticket:
+      - name: paidWith
+        type: payments.PaymentMethod
+```
+
+The linter now resolves that reference — a typo like `payments.PaymentMode` is
+an error, not a shrug — and the [rendered model](./garage.modelith.md) links
+`paidWith` straight to the enum in the
+[payments model](./payments.modelith.md). One definition, in the context that
+owns it.
+
+Full rules, including how to name a scope explicitly when the filename won't do:
+[Imports](../06-schema-reference.md#imports).

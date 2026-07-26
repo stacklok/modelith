@@ -20,8 +20,9 @@ func TestADR_0009_NoSelfModel(t *testing.T) {
 	t.Parallel()
 
 	allowed := map[string]string{
-		"examples/example.modelith.yaml":              "the worked example (golden fixture)",
-		"docs/05-parking-garage/garage.modelith.yaml": "the docs example (golden fixture)",
+		"examples/example.modelith.yaml":                "the worked example (golden fixture)",
+		"docs/05-parking-garage/garage.modelith.yaml":   "the docs example (golden fixture)",
+		"docs/05-parking-garage/payments.modelith.yaml": "the docs example's imported peer model (golden fixture)",
 	}
 
 	root := repoRoot(t)

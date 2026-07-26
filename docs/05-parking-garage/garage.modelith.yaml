@@ -7,6 +7,9 @@ description: >-
   them, and the two ways a car enters — a monthly parker's keycard or a
   temporary visitor's pay-on-exit ticket.
 
+imports:
+  - ./payments.modelith.yaml
+
 glossary:
   Operator: >-
     Garage staff or management who open `Account`s, issue `Keycard`s, register
@@ -245,6 +248,11 @@ entities:
       - name: paidAt
         type: timestamp
         description: When the `Ticket` was paid; unset until then.
+      - name: paidWith
+        type: payments.PaymentMethod
+        description: >-
+          How the fee was settled at the `Kiosk`; unset until paid. The garage
+          does not define what a payment method is — the payments model does.
       - name: paid
         type: boolean
         derived: true
