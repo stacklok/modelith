@@ -80,16 +80,16 @@ erDiagram
     Spot {}
     Ticket {}
     Visit {}
-    Account ||--o{ Keycard : "owned"
-    Account ||--o{ Car : "owned"
-    Garage ||--o{ Spot : "owned"
-    Garage ||--o{ Kiosk : "owned"
-    Spot ||--|| Account : "referenced"
-    Ticket }o--|| Kiosk : "referenced"
-    Visit }o--|| Spot : "referenced"
-    Visit }o--|| Car : "referenced"
-    Visit }o--|| Keycard : "referenced"
-    Visit ||--|| Ticket : "owned"
+    Account ||--o{ Keycard : ""
+    Account ||--o{ Car : ""
+    Garage ||--o{ Spot : ""
+    Garage ||--o{ Kiosk : ""
+    Spot ||..|| Account : ""
+    Ticket }o..|| Kiosk : ""
+    Visit }o..|| Spot : ""
+    Visit }o..|| Car : ""
+    Visit }o..|| Keycard : ""
+    Visit ||--|| Ticket : ""
 ```
 
 > **Agent:** This is the minimum useful model — honest to stop here and
@@ -105,7 +105,7 @@ erDiagram
 > **You:** Let's go `n:1` for spot→account. Any of the cars on an account can
 > park in any of its spots.
 
-A one-line change to the cardinality; the diagram updates to `Spot }o--|| Account`.
+A one-line change to the cardinality; the diagram updates to `Spot }o..|| Account`.
 
 ## Pass 2 — the behavior
 

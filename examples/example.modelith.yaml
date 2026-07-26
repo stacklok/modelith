@@ -13,6 +13,9 @@ glossary:
     it, and manage its `Policies`.
   Member: >
     A `User` granted access to a `Project` without ownership rights.
+  Predecessor: >
+    An archived `Project` that a newer one replaced, kept so the history of the
+    work isn't lost.
 
 enums:
   ProjectStatus:
@@ -37,6 +40,11 @@ entities:
       - entity: Policy
         cardinality: "1:n"
         ownership: owned
+      - entity: Project
+        cardinality: "1:0..1"
+        role: "`Predecessor`"
+        ownership: referenced
+        note: The archived `Project` this one replaced, if any
     attributes:
       - name: status
         type: ProjectStatus

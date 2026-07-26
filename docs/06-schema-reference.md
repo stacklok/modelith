@@ -129,7 +129,7 @@ as derived entities.
 | `entity` | string | yes | Target entity name. Must reference a defined entity. |
 | `cardinality` | string | yes | Written `left:right` (see below). `1:1`, `1:n`, `n:1`, `n:n` are the common shorthands. |
 | `symmetric` | boolean | no | The relationship carries no inherent order: `(a, b)` is the same as `(b, a)`. Only valid on a self-referential relationship or one whose target side is more than one. |
-| `role` | string | no | The role the related entity plays. Backtick entity names. |
+| `role` | string | no | The **short** role the related entity plays (`Owner`, `Predecessor`) — ideally a glossary term. Backtick entity and glossary names. It is the only label the diagram draws, so prose belongs in `note`; the linter warns on a role that reads as a sentence. |
 | `ownership` | enum | no | Is the related entity *part of* this one? `owned` = it can't exist independently (composition: created within, and deleted with, this entity); `referenced` = an independent entity this one points at. Omitted ⇒ `referenced`. |
 | `note` | string | no | Freeform note. |
 
@@ -153,6 +153,22 @@ other, or sits on the "one" side of a one-to-many — prefer declaring the
 relationship there (e.g. on `Project`, not `Policy`). It keeps each link in one
 obvious place and reads the way the domain does. Declare from both ends only
 when both views genuinely add clarity.
+
+**How a relationship draws.** Three conventions, recorded in
+[ADR-0008](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0008-er-diagram-conventions.md)
+and covered in full in [Reading the Diagrams](./04-reading-the-diagrams.md):
+
+- **`ownership` is the line style** — solid (identifying) for `owned`, dashed
+  (non-identifying) for `referenced` and for an omitted `ownership`. It costs no
+  label space. Ownership belongs to the relationship rather than the end that
+  declared it, so a parent's `owned` and the child's `referenced` fold into one
+  solid line.
+- **`role` is the only label** — `ownership` and `cardinality` are never written
+  on a line. Keep the role short; put the explanation in `note`.
+- **A self-referential relationship becomes a row inside the entity's box**
+  (`Project self "0..1 — Predecessor"`), not a line looping back on it. Mermaid's
+  ER layout has no self-loop handling, and the arc it draws swamps the diagram.
+  The row carries the cardinality, `owned` when owned, and the role.
 
 ## Attribute
 
@@ -282,6 +298,9 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
       term, role, or actor;
     - a relationship `role` that resolves to neither an entity nor a glossary
       term — define it in the glossary;
+    - a relationship `role` that reads as prose (more than four words, or
+      sentence punctuation) — the role is the only label on the rendered
+      diagram line, so the explanation belongs in `note`;
     - an attribute `type` that looks like an enum reference (PascalCase) but
       names no defined enum;
     - an action `actor` that is neither a defined entity nor a glossary term.

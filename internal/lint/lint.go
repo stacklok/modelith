@@ -300,6 +300,20 @@ func runSemantic(m *model.Model, res *Result) {
 					Message:  fmt.Sprintf("entity %q owns %q, which is derived — composing an ephemeral, never-persisted entity is usually a modeling error", name, rel.Entity),
 				})
 			}
+			// A prose role wrecks the diagram: it is the only label on the
+			// rendered relationship line (ADR-0008), so a sentence there
+			// collides with its neighbours. `note` is the field for prose.
+			if readsAsProse(rel.Role) {
+				res.Findings = append(res.Findings, Finding{
+					Severity: SeverityWarning,
+					Category: CategorySemantic,
+					Path:     fmt.Sprintf("/entities/%s/relationships/%d/role", name, i),
+					Message: fmt.Sprintf(
+						"role %q reads as prose — keep the role to a short role name (ideally a glossary term) and move the explanation to the relationship's note",
+						rel.Role,
+					),
+				})
+			}
 			// A role names a non-entity vocabulary term; it should resolve to an
 			// entity or a glossary term (the DDD-1 payoff — undefined roles).
 			for _, base := range entityRefs(rel.Role) {
@@ -789,6 +803,21 @@ func entityRefs(text string) []string {
 		}
 	}
 	return out
+}
+
+// readsAsProse reports whether a relationship role is written as a sentence
+// rather than a role name. The heuristic is deliberately loose — more than four
+// words, or sentence punctuation — because it only ever raises a warning:
+// "`Owner` or `Member`" passes, "the record this one supersedes" does not.
+func readsAsProse(role string) bool {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return false
+	}
+	if strings.ContainsAny(role, ",.;") {
+		return true
+	}
+	return len(strings.Fields(role)) > 4
 }
 
 // plural is a naive English pluralizer good enough to match entity names like

@@ -2,6 +2,7 @@ package lint
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -574,6 +575,70 @@ scenarios:
 	}
 	if findingWithMessage(res.Findings, "Maintainer") {
 		t.Fatalf("a glossary-defined role should not warn, got: %+v", res.Findings)
+	}
+}
+
+// A prose role is the only label on the rendered relationship line (ADR-0008),
+// so it collides with its neighbours in the diagram. The linter steers the
+// prose to `note` — as a warning, never an error.
+func TestProseRoleIsWarning(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		role string
+		want bool
+	}{
+		{name: "role name", role: "`Owner`", want: false},
+		{name: "two role names", role: "`Owner` or `Member`", want: false},
+		{name: "four words", role: "primary contact for escalation", want: false},
+		{name: "five words", role: "the record this one supersedes", want: true},
+		{name: "comma", role: "owner, or member", want: true},
+		{name: "full stop", role: "The owning project.", want: true},
+		{name: "semicolon", role: "owner; also billing", want: true},
+		{name: "empty", role: "", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			src := `
+kind: DomainModel
+version: v1
+entities:
+  Project:
+    definition: A container.
+    relationships:
+      - entity: User
+        cardinality: "n:n"
+        role: ` + strconv.Quote(tc.role) + `
+  User:
+    definition: A principal.
+`
+			res, err := Run([]byte(src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := findingWithMessage(res.Findings, "reads as prose")
+			if got != tc.want {
+				t.Fatalf("role %q: prose warning = %v, want %v; findings: %+v", tc.role, got, tc.want, res.Findings)
+			}
+			if !got {
+				return
+			}
+			for _, f := range res.Findings {
+				if !strings.Contains(f.Message, "reads as prose") {
+					continue
+				}
+				if f.Severity != SeverityWarning || f.Category != CategorySemantic {
+					t.Errorf("expected a semantic warning, got %s/%s", f.Severity, f.Category)
+				}
+				if want := "/entities/Project/relationships/0/role"; f.Path != want {
+					t.Errorf("path = %q, want %q", f.Path, want)
+				}
+			}
+			if res.HasBlocking(false) {
+				t.Error("a prose role is advisory, not blocking")
+			}
+		})
 	}
 }
 

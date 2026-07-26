@@ -6,6 +6,7 @@ package mermaid
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/stacklok/modelith/internal/model"
@@ -17,12 +18,27 @@ import (
 // precise count lives in the Markdown table and role instead (see ADR-0002).
 // An unparseable cardinality falls back to many-to-many, matching the schema's
 // pre-validation expectation that it is already a structural error.
-func erMarkers(card string) string {
+//
+// owned selects the connector: an identifying line ("--") for composition, a
+// non-identifying one ("..") otherwise, so ownership costs no label space
+// (ADR-0008).
+func erMarkers(card string, owned bool) string {
+	line := connector(owned)
 	left, right, ok := model.ParseCardinality(card)
 	if !ok {
-		return "}o--o{"
+		return "}o" + line + "o{"
 	}
-	return leftMarker(left) + "--" + rightMarker(right)
+	return leftMarker(left) + line + rightMarker(right)
+}
+
+// connector is the Mermaid relationship line: identifying (solid) when the
+// related entity is owned, non-identifying (dashed) otherwise. The schema's
+// default for an omitted ownership is "referenced", so omitted draws dashed.
+func connector(owned bool) string {
+	if owned {
+		return "--"
+	}
+	return ".."
 }
 
 // minChar is the innermost glyph (nearest the relationship line): "o" for a
@@ -58,23 +74,45 @@ func rightMarker(m model.Multiplicity) string {
 	return minChar(m) + "|"
 }
 
-// ER renders the model as a Mermaid erDiagram. Attributes are intentionally
-// omitted: their freeform conceptual types (e.g. "enum[active, archived]")
-// aren't valid erDiagram attribute types. Attributes are shown in the Markdown
-// table instead.
+// edge is one rendered relationship line, accumulated before emission so that
+// declarations of the same relationship from both ends fold into it.
+type edge struct {
+	from, to string
+	card     string // as declared by `from`, so the markers read left to right
+	label    string
+	owned    bool
+}
+
+// ER renders the model as a Mermaid erDiagram. Ordinary attributes are
+// intentionally omitted: their freeform conceptual types (e.g.
+// "enum[active, archived]") aren't valid erDiagram attribute types, so they are
+// shown in the Markdown table instead. The one thing inside an entity block is
+// its self-referential relationships (see selfRows).
 func ER(m *model.Model) string {
 	var b strings.Builder
 	b.WriteString("erDiagram\n")
 
 	// Declare every entity so unconnected ones still appear.
 	for _, name := range m.EntityNames() {
-		fmt.Fprintf(&b, "    %s {}\n", name)
+		rows := selfRows(name, m.Entities[name].Relationships)
+		if len(rows) == 0 {
+			fmt.Fprintf(&b, "    %s {}\n", name)
+			continue
+		}
+		fmt.Fprintf(&b, "    %s {\n", name)
+		for _, row := range rows {
+			fmt.Fprintf(&b, "        %s\n", row)
+		}
+		b.WriteString("    }\n")
 	}
 
-	seen := map[string]bool{}
+	var edges []*edge
+	byKey := map[string]*edge{}
 	for _, name := range m.EntityNames() {
 		for _, rel := range m.Entities[name].Relationships {
-			notation := erMarkers(rel.Cardinality)
+			if rel.Entity == name {
+				continue // already rendered inside the entity's block
+			}
 			label := relationshipLabel(rel)
 
 			// Dedupe edges declared from both sides of the same pair. The key
@@ -96,26 +134,70 @@ func ER(m *model.Model) string {
 			// ("1:n" and "0..n:1") dedupes to one edge.
 			card = model.CanonicalCardinality(card)
 			key := pair[0] + "\x00" + pair[1] + "\x00" + card + "\x00" + label
-			if seen[key] {
+			if e, ok := byKey[key]; ok {
+				// Ownership belongs to the relationship, not to the end that
+				// declared it: a parent declaring `owned` and the child
+				// declaring `referenced` are one identifying relationship seen
+				// from two sides, so the folded edge stays solid (ADR-0008).
+				e.owned = e.owned || rel.Ownership == "owned"
 				continue
 			}
-			seen[key] = true
-
-			fmt.Fprintf(&b, "    %s %s %s : %q\n", name, notation, rel.Entity, label)
+			e := &edge{from: name, to: rel.Entity, card: rel.Cardinality, label: label, owned: rel.Ownership == "owned"}
+			byKey[key] = e
+			edges = append(edges, e)
 		}
+	}
+
+	for _, e := range edges {
+		fmt.Fprintf(&b, "    %s %s %s : %q\n", e.from, erMarkers(e.card, e.owned), e.to, e.label)
 	}
 	return b.String()
 }
 
-func relationshipLabel(rel model.Relationship) string {
-	switch {
-	case rel.Role != "":
-		return sanitize(rel.Role)
-	case rel.Ownership != "":
-		return rel.Ownership
-	default:
-		return rel.Cardinality
+// selfRows renders an entity's self-referential relationships as rows inside
+// its own block. Mermaid's dagre ER layout has no self-loop handling, so an
+// edge from an entity to itself draws a runaway arc that swamps the canvas
+// (issue #26); the row carries the same information without a line (ADR-0008).
+// Row names are self, self2, self3… — distinct, since Mermaid does not
+// disambiguate two attributes sharing a name.
+func selfRows(name string, rels []model.Relationship) []string {
+	var rows []string
+	for _, rel := range rels {
+		if rel.Entity != name {
+			continue
+		}
+		attr := "self"
+		if n := len(rows) + 1; n > 1 {
+			attr = "self" + strconv.Itoa(n)
+		}
+		rows = append(rows, fmt.Sprintf("%s %s %q", name, attr, selfComment(rel)))
 	}
+	return rows
+}
+
+// selfComment is the comment column of a self-relationship row: the target-side
+// cardinality, the ownership when owned (the line style that carries it
+// elsewhere has no line here), then the role.
+func selfComment(rel model.Relationship) string {
+	target := rel.Cardinality
+	if _, right, ok := strings.Cut(rel.Cardinality, ":"); ok {
+		target = right
+	}
+	out := target
+	if rel.Ownership == "owned" {
+		out += " owned"
+	}
+	if rel.Role != "" {
+		out += " — " + rel.Role
+	}
+	return sanitize(out)
+}
+
+// relationshipLabel is the quoted text on a relationship line: the role, or
+// nothing. Ownership rides on the line style instead, and the precise
+// cardinality lives in the Markdown table (ADR-0002, ADR-0008).
+func relationshipLabel(rel model.Relationship) string {
+	return sanitize(rel.Role)
 }
 
 // sanitize strips or replaces characters that would break a quoted Mermaid

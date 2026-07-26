@@ -8,6 +8,7 @@ A small, illustrative model used in the docs and as a golden fixture for the too
 
 - **`Member`** — A `User` granted access to a `Project` without ownership rights.
 - **`Owner`** — A `User` with full control of a `Project` — can transfer ownership, archive it, and manage its `Policies`.
+- **`Predecessor`** — An archived `Project` that a newer one replaced, kept so the history of the work isn't lost.
 
 ## Enums
 
@@ -50,6 +51,7 @@ A container for a set of related `Policies`, owned by at least one `User`. `Proj
 
 - `User` — n:n — referenced — `Owner` or `Member` — Must always have at least one `Owner`
 - `Policy` — 1:n — owned
+- `Project` — 1:0..1 — referenced — `Predecessor` — The archived `Project` this one replaced, if any
 
 **Attributes**
 
@@ -88,11 +90,12 @@ A human principal who can own or belong to `Projects`. Identity is managed exter
 ```mermaid
 erDiagram
     Policy {}
-    Project {}
+    Project {
+        Project self "0..1 — Predecessor"
+    }
     User {}
-    Policy }o--|| Project : "referenced"
-    Project }o--o{ User : "Owner or Member"
-    Project ||--o{ Policy : "owned"
+    Policy }o--|| Project : ""
+    Project }o..o{ User : "Owner or Member"
 ```
 
 ## Invariants

@@ -48,7 +48,8 @@ the flag.
   that aren't inverses. Warnings: a backticked term resolves to no entity, role,
   or actor; an action `actor` that's neither an entity nor a glossary term; a
   PascalCase attribute `type` that names no defined enum — usually a typo or a
-  concept that was never named. Decide which it is and propose the fix.
+  concept that was never named; a relationship `role` written as prose, which
+  belongs in `note`. Decide which it is and propose the fix.
 - **Completeness (advisory warning).** Gaps, not bugs: an entity with no
   invariants, an entity no scenario exercises, a glossary term defined but never
   referenced, or an enum no attribute uses. These are what `--completeness error`

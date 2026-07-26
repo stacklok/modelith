@@ -231,16 +231,16 @@ erDiagram
     Spot {}
     Ticket {}
     Visit {}
-    Account ||--o{ Keycard : "owned"
-    Account ||--o{ Car : "owned"
-    Garage ||--o{ Spot : "owned"
-    Garage ||--o{ Kiosk : "owned"
-    Spot }o--|| Account : "referenced"
-    Ticket }o--|| Kiosk : "referenced"
-    Visit }o--|| Spot : "referenced"
-    Visit }o--|| Car : "referenced"
-    Visit }o--|| Keycard : "referenced"
-    Visit ||--|| Ticket : "owned"
+    Account ||--o{ Keycard : ""
+    Account ||--o{ Car : ""
+    Garage ||--o{ Spot : ""
+    Garage ||--o{ Kiosk : ""
+    Spot }o..|| Account : ""
+    Ticket }o..|| Kiosk : ""
+    Visit }o..|| Spot : ""
+    Visit }o..|| Car : ""
+    Visit }o..|| Keycard : ""
+    Visit ||--|| Ticket : ""
 ```
 
 ## Scenarios

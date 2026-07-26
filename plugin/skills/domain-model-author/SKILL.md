@@ -114,6 +114,10 @@ Follow the format exactly (see the schema reference). Key conventions:
   relationship from both entities, the two cardinalities must be inverses
   (`1:n` ⇄ `n:1`; `1:1`/`n:n` symmetric) — a contradiction is a lint **error**.
   Declaring it from one side only is fine and usually clearer.
+- **`role` is a short role name** (`` `Owner` ``, `` `Predecessor` ``), not a
+  sentence: it is the only label drawn on the diagram line, so prose there
+  collides with neighbouring lines and warns. Put the explanation in `note`.
+  `ownership` needs no label — it draws as a solid vs dashed line.
 - **`glossary`** (top level) defines non-entity vocabulary — roles like `Owner`,
   states, domain nouns — as `Term: "definition"`. Define any role or actor name
   here; an undefined role warns, and an unused glossary term warns.
