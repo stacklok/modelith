@@ -6,7 +6,10 @@
 #
 # Two source shapes are extracted, since the repo has both:
 #   - ```mermaid fenced code blocks inside Markdown: examples/*.md and
-#     docs/05-parking-garage/*.md (the renderer's committed golden output).
+#     docs/05-parking-garage/*.md (the renderer's committed golden output),
+#     plus docs/04-reading-the-diagrams.md, whose diagrams are hand-authored.
+#     Hand-authored blocks matter most here: nothing regenerates them, so a
+#     broken one ships silently, and that page is what teaches the notation.
 #   - raw, unfenced .mmd files: internal/render/mermaid/testdata/*.mmd (the
 #     Go golden-test fixtures for the renderer, pinned as bare Mermaid source
 #     with no surrounding fence). These are already exactly what mmdc expects,
@@ -82,7 +85,7 @@ extract_and_check_md() {
   fi
 }
 
-md_files=(examples/*.md docs/05-parking-garage/*.md)
+md_files=(examples/*.md docs/04-reading-the-diagrams.md docs/05-parking-garage/*.md)
 mmd_files=(internal/render/mermaid/testdata/*.mmd)
 
 if [ ${#md_files[@]} -eq 0 ] && [ ${#mmd_files[@]} -eq 0 ]; then
