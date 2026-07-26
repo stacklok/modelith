@@ -682,12 +682,13 @@ entities:
 	}
 }
 
-// TestADR_0008_ReciprocalOwnershipConflictIsError pins the diagnostics half of
-// ADR-0008's fold rule. The renderer folds two declarations into one line only
-// when they are one relationship seen from two sides; the cases it cannot
-// reconcile draw two contradictory lines, so the linter names them instead of
-// letting either the diagram or the fold swallow the disagreement.
-func TestADR_0008_ReciprocalOwnershipConflictIsError(t *testing.T) {
+// TestADR_0008_MutualOwnershipIsError pins the one ownership contradiction a
+// reciprocal pair can hold: both ends claiming to own the other. A relationship
+// is owned by at most one end, so the renderer refuses to fold it and the
+// linter names it. Exactly one end owning is the ordinary composition pattern
+// and must stay clean whatever roles the two ends give it — see
+// TestADR_0008_ReciprocalCompositionLintsClean.
+func TestADR_0008_MutualOwnershipIsError(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name       string
@@ -702,27 +703,21 @@ func TestADR_0008_ReciprocalOwnershipConflictIsError(t *testing.T) {
 			want: "mutual ownership",
 		},
 		{
-			name: "disagreement the fold cannot resolve, because the roles differ",
-			aOwn: "owned", bOwn: "referenced",
+			name: "mutual owned under differing roles is still a contradiction",
+			aOwn: "owned", bOwn: "owned",
 			aRole: "part", bRole: "whole",
-			want:  "reciprocal ownership conflict",
+			want:  "mutual ownership",
 		},
 		{
-			name: "disagreement the fold resolves into one solid line",
+			name: "one end owning, the other referencing",
 			aOwn: "owned", bOwn: "referenced",
-			aRole: "`Part`", bRole: "`Part`",
+			aRole: "part", bRole: "whole",
 			want:  "",
 		},
 		{
 			name: "an omitted ownership on the other end is the same as referenced",
 			aOwn: "owned", bOwn: "",
 			want: "",
-		},
-		{
-			name: "backticks are markup, so the roles still match",
-			aOwn: "owned", bOwn: "referenced",
-			aRole: "`Part`", bRole: "Part",
-			want:  "",
 		},
 		{
 			name: "neither end claims ownership",
@@ -761,13 +756,13 @@ entities:
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, msg := range []string{"mutual ownership", "reciprocal ownership conflict"} {
-				got := findingWithMessage(res.Findings, msg)
-				if got != (msg == tc.want) {
-					t.Fatalf("%q finding = %v, want %v; findings: %+v", msg, got, msg == tc.want, res.Findings)
-				}
+			if got := findingWithMessage(res.Findings, "mutual ownership"); got != (tc.want != "") {
+				t.Fatalf("mutual-ownership finding = %v, want %v; findings: %+v", got, tc.want != "", res.Findings)
 			}
 			if tc.want == "" {
+				if res.HasBlocking(false) {
+					t.Fatalf("expected no error on a legitimate pair, got: %+v", res.Findings)
+				}
 				return
 			}
 			for _, f := range res.Findings {
@@ -785,6 +780,54 @@ entities:
 				t.Error("an ownership contradiction must block")
 			}
 		})
+	}
+}
+
+// TestADR_0008_ReciprocalCompositionLintsClean is the linter half of the
+// regression guard on the textbook composition pattern: a parent owns a child,
+// the child references the parent back, and each end names its own role. It is
+// one relationship seen from two sides, which the renderer folds into a single
+// solid line (TestADR_0008_ReciprocalCompositionFoldsToOneEdge), so it must
+// produce no finding at all — not a warning, and certainly not an error that
+// would fail a CI gate on a correct model.
+func TestADR_0008_ReciprocalCompositionLintsClean(t *testing.T) {
+	t.Parallel()
+	src := `
+kind: DomainModel
+version: v1
+title: Composition declared from both ends
+entities:
+  Alpha:
+    definition: A container.
+    invariants:
+      - id: alpha-1
+        statement: An Alpha always has a name.
+    relationships:
+      - entity: Beta
+        cardinality: "1:n"
+        ownership: owned
+        role: part
+  Beta:
+    definition: A component.
+    invariants:
+      - id: beta-1
+        statement: A Beta always belongs to an Alpha.
+    relationships:
+      - entity: Alpha
+        cardinality: "n:1"
+        ownership: referenced
+        role: whole
+scenarios:
+  - name: compose
+    actors: [Alpha]
+    steps: ["an ` + "`Alpha`" + ` gains a ` + "`Beta`" + `"]
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("expected no findings on a reciprocal composition, got %d: %+v", len(res.Findings), res.Findings)
 	}
 }
 

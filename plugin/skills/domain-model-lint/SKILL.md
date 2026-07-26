@@ -45,8 +45,8 @@ the flag.
   `invariants_touched` or an action's `preserves` names an invariant id no entity
   or top-level `invariants` entry declares; the same invariant id is declared
   twice (entity-level and top-level invariants share one id namespace); reciprocal cardinalities
-  that aren't inverses; reciprocal declarations that both claim `ownership: owned`,
-  or that disagree on ownership under different roles. Warnings: a backticked term resolves to no entity, role,
+  that aren't inverses; reciprocal declarations that both claim
+  `ownership: owned`. Warnings: a backticked term resolves to no entity, role,
   or actor; an action `actor` that's neither an entity nor a glossary term; a
   PascalCase attribute `type` that names no defined enum — usually a typo or a
   concept that was never named; a relationship `role` written as prose, which

@@ -162,9 +162,10 @@ and covered in full in [Reading the Diagrams](./04-reading-the-diagrams.md):
   (non-identifying) for `referenced` and for an omitted `ownership`. It costs no
   label space. Ownership belongs to the relationship rather than the end that
   declared it, so a parent's `owned` and the child's `referenced` fold into one
-  solid line — when the two declarations otherwise match (inverse cardinalities,
-  the same role). Declarations the renderer can't reconcile draw as separate
-  lines, and mutual `owned` or an unreconcilable disagreement is a lint error.
+  solid line when their cardinalities are inverses — even when the two ends name
+  different roles, in which case the owning end's role labels the line and the
+  other stays in the Markdown. Declarations the renderer can't reduce to one
+  relationship draw as separate lines, and mutual `owned` is a lint error.
 - **`role` is the only label** — `ownership` and `cardinality` are never written
   on a line. Keep the role short; put the explanation in `note`.
 - **A self-referential relationship becomes a row inside the entity's box**
@@ -294,9 +295,6 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
       inverses (e.g. `Project`→`Policy` `1:n` but `Policy`→`Project` `1:1`);
     - a relationship declared from both sides where both ends claim
       `ownership: owned` — a relationship is owned by at most one end;
-    - a relationship declared from both sides whose ends disagree on
-      `ownership` and give it different roles, so the diagram would draw one
-      solid and one dashed line for the same relationship;
     - a duplicate invariant `id` (across entity-level *and* model-level
       invariants — they share one namespace);
     - a scenario `invariants_touched` or an action `preserves` that references an

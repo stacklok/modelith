@@ -165,9 +165,11 @@ func TestADR_0008_OwnershipFoldsAcrossDeclarations(t *testing.T) {
 
 // TestADR_0008_FoldsOnlyGenuineReciprocals pins the fold predicate of ADR-0008.
 // Two declarations become one line only when they are one relationship seen
-// from two sides — opposite ends, inverse cardinality, the same label, and at
-// most one end claiming `owned` — or when one is an exact duplicate of the
-// other. Everything else draws both lines, so no declaration vanishes.
+// from two sides — opposite ends, inverse cardinality, and at most one end
+// claiming `owned` — or when one is an exact duplicate of the other. Roles are
+// not part of the predicate: the two ends of a composition naturally name
+// different roles. Everything else draws both lines, so no declaration
+// vanishes.
 func TestADR_0008_FoldsOnlyGenuineReciprocals(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -212,11 +214,25 @@ func TestADR_0008_FoldsOnlyGenuineReciprocals(t *testing.T) {
 			want:  []string{"    A ||--o{ B : \"\"\n"},
 		},
 		{
-			name:  "opposite ends, roles differ: two labels, so both lines draw",
+			name:  "opposite ends, roles differ: one line, labelled by the owning end",
 			a:     model.Relationship{Entity: "B", Cardinality: "1:n", Ownership: "owned", Role: "part"},
 			b:     model.Relationship{Entity: "A", Cardinality: "n:1", Role: "whole"},
 			bFrom: "B",
-			want:  []string{"    A ||--o{ B : \"part\"\n", "    B }o..|| A : \"whole\"\n"},
+			want:  []string{"    A ||--o{ B : \"part\"\n"},
+		},
+		{
+			name:  "opposite ends, roles differ, neither owns: the first entity's role labels it",
+			a:     model.Relationship{Entity: "B", Cardinality: "1:n", Role: "part"},
+			b:     model.Relationship{Entity: "A", Cardinality: "n:1", Role: "whole"},
+			bFrom: "B",
+			want:  []string{"    A ||..o{ B : \"part\"\n"},
+		},
+		{
+			name:  "same end, roles differ: an Owner and a Member are two relationships",
+			a:     model.Relationship{Entity: "B", Cardinality: "1:n", Role: "Owner"},
+			b:     model.Relationship{Entity: "B", Cardinality: "1:n", Role: "Member"},
+			bFrom: "A",
+			want:  []string{"    A ||..o{ B : \"Owner\"\n", "    A ||..o{ B : \"Member\"\n"},
 		},
 	}
 	for _, tc := range cases {
@@ -239,6 +255,58 @@ func TestADR_0008_FoldsOnlyGenuineReciprocals(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestADR_0008_ReciprocalCompositionFoldsToOneEdge is the regression guard for
+// the textbook composition pattern: a parent owns a child and the child
+// references the parent back, each naming its own end's role. That is one
+// relationship seen from two sides — the case the fold exists for — so it must
+// draw exactly one solid line, labelled by the owning end. Requiring the two
+// roles to match instead would split it into a solid line and a dashed one.
+// `TestADR_0008_ReciprocalCompositionLintsClean` pins the linter's half.
+func TestADR_0008_ReciprocalCompositionFoldsToOneEdge(t *testing.T) {
+	t.Parallel()
+	m := &model.Model{Entities: map[string]model.Entity{
+		"Alpha": {Definition: "one", Relationships: []model.Relationship{
+			{Entity: "Beta", Cardinality: "1:n", Ownership: "owned", Role: "part"},
+		}},
+		"Beta": {Definition: "two", Relationships: []model.Relationship{
+			{Entity: "Alpha", Cardinality: "n:1", Ownership: "referenced", Role: "whole"},
+		}},
+	}}
+	out := ER(m)
+	if want := "    Alpha ||--o{ Beta : \"part\"\n"; !strings.Contains(out, want) {
+		t.Errorf("expected one solid edge %q; got:\n%s", want, out)
+	}
+	if n := strings.Count(out, " : "); n != 1 {
+		t.Errorf("expected exactly one edge, got %d:\n%s", n, out)
+	}
+}
+
+// TestERFoldsOneReciprocalPerEdge guards the fold against absorbing more than
+// one declaration from the opposite end. Three declarations on one pair are not
+// one relationship, and the linter deliberately leaves such a pair alone, so the
+// renderer must not merge them all into a single line.
+func TestERFoldsOneReciprocalPerEdge(t *testing.T) {
+	t.Parallel()
+	m := &model.Model{Entities: map[string]model.Entity{
+		"Alpha": {Definition: "one", Relationships: []model.Relationship{
+			{Entity: "Beta", Cardinality: "n:n", Role: "Owner"},
+		}},
+		"Beta": {Definition: "two", Relationships: []model.Relationship{
+			{Entity: "Alpha", Cardinality: "n:n", Role: "Member"},
+			{Entity: "Alpha", Cardinality: "n:n", Role: "Watcher"},
+		}},
+	}}
+	out := ER(m)
+	if n := strings.Count(out, " : "); n != 2 {
+		t.Errorf("expected two edges, got %d:\n%s", n, out)
+	}
+	for _, want := range []string{"    Alpha }o..o{ Beta : \"Owner\"\n", "    Beta }o..o{ Alpha : \"Watcher\"\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected edge %q; got:\n%s", want, out)
+		}
 	}
 }
 

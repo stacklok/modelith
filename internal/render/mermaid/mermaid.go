@@ -77,33 +77,63 @@ func rightMarker(m model.Multiplicity) string {
 // edge is one rendered relationship line, accumulated before emission so that
 // declarations of the same relationship from both ends fold into it.
 type edge struct {
-	from, to string
-	card     string // as declared by `from`, so the markers read left to right
-	label    string
-	owned    bool
+	from, to   string
+	card       string // as declared by `from`, so the markers read left to right
+	label      string
+	owned      bool
+	foldedFrom string // the opposite end already folded in, if any
 }
 
-// folds reports whether a declaration made by `from`, with the given ownership,
-// is the same drawn line as e rather than a second one. It is only ever asked
-// about declarations that already agree on the pair, the canonical cardinality
-// (normalized to the sorted-pair orientation, so inverses match) and the label.
-// Two such declarations merge in exactly two cases (ADR-0008):
+// folds reports whether a declaration made by `from`, with the given ownership
+// and label, is the same drawn line as e rather than a second one. It is only
+// ever asked about declarations that already agree on the pair and on the
+// canonical cardinality (normalized to the sorted-pair orientation, so inverses
+// match). Two such declarations merge in exactly two cases (ADR-0008):
 //
-//   - the same end declared it twice with the same ownership — an exact
-//     duplicate, which would draw two indistinguishable lines;
 //   - opposite ends declared it and at most one of them claims `owned` — one
 //     relationship seen from two sides, whose ownership belongs to the
-//     relationship rather than to the end that named it.
+//     relationship rather than to the end that named it. The two ends may name
+//     different roles: that is the ordinary composition pattern (a parent's
+//     "part" is a child's "whole"), not a conflict, so the label is chosen
+//     rather than compared (see merge). Only one opposite-end declaration
+//     folds in, mirroring the linter, which reconciles a pair only when each
+//     direction declares it exactly once.
+//   - the same end declared it twice with the same ownership and the same label
+//     — an exact duplicate, which would draw two indistinguishable lines. The
+//     label matters here: two declarations from one end with different roles
+//     (a User who is both `Owner` and `Member` of a Project) are two
+//     relationships.
 //
 // Everything else stays a distinct edge, so no declaration disappears from the
 // diagram: two declarations from the same end differing only in `ownership` are
-// two relationships, and mutual `owned` is a contradiction. `modelith lint`
-// reports the contradictions.
-func (e *edge) folds(from string, owned bool) bool {
+// two relationships, and mutual `owned` is a contradiction `modelith lint`
+// reports as an error.
+func (e *edge) folds(from, label string, owned bool) bool {
 	if e.from == from {
-		return e.owned == owned
+		return e.owned == owned && e.label == label
 	}
-	return !e.owned || !owned
+	return e.foldedFrom == "" && (!e.owned || !owned)
+}
+
+// merge folds a declaration into e, choosing the label the single drawn line
+// carries. The owning end wins, because its role names the relationship the
+// composition is about; with neither end owning, the end whose entity sorts
+// first wins, so the choice never depends on iteration order. The role the
+// diagram drops is still in that entity's relationship list in the Markdown —
+// the diagram is a declaredly lossy view (ADR-0002).
+func (e *edge) merge(from, label string, owned bool) {
+	switch {
+	case owned && !e.owned:
+		e.label = label
+	case e.owned && !owned:
+		// The existing edge is the owning end; its label stands.
+	case from < e.from:
+		e.label = label
+	}
+	if from != e.from {
+		e.foldedFrom = from
+	}
+	e.owned = e.owned || owned
 }
 
 // ER renders the model as a Mermaid erDiagram. Ordinary attributes are
@@ -139,14 +169,14 @@ func ER(m *model.Model) string {
 			label := relationshipLabel(rel)
 			owned := rel.Ownership == "owned"
 
-			// Group candidate declarations of one drawn line. The key includes
-			// the cardinality normalized to the sorted-pair orientation, so a
-			// relationship declared from both sides with inverse cardinalities
-			// (A "1:n" B, B "n:1" A) is a candidate to fold — while genuinely
-			// distinct edges (GO-3) or contradictory reciprocal declarations
-			// (GO-1) get distinct keys and both render, surfacing the conflict
-			// instead of silently dropping one. Matching the key is necessary
-			// but not sufficient: edge.folds decides.
+			// Group candidate declarations of one drawn line. The key is the
+			// pair plus the cardinality normalized to the sorted-pair
+			// orientation, so a relationship declared from both sides with
+			// inverse cardinalities (A "1:n" B, B "n:1" A) is a candidate to
+			// fold — while genuinely distinct edges (GO-3) or contradictory
+			// reciprocal declarations (GO-1) get distinct keys and both render,
+			// surfacing the conflict instead of silently dropping one. Matching
+			// the key is necessary but not sufficient: edge.folds decides.
 			pair := []string{name, rel.Entity}
 			sort.Strings(pair)
 			card := rel.Cardinality
@@ -157,18 +187,14 @@ func ER(m *model.Model) string {
 			// semantically equal but differently written cardinalities
 			// ("1:n" and "0..n:1") dedupes to one edge.
 			card = model.CanonicalCardinality(card)
-			key := pair[0] + "\x00" + pair[1] + "\x00" + card + "\x00" + label
+			key := pair[0] + "\x00" + pair[1] + "\x00" + card
 
 			folded := false
 			for _, e := range byKey[key] {
-				if !e.folds(name, owned) {
+				if !e.folds(name, label, owned) {
 					continue
 				}
-				// Ownership belongs to the relationship, not to the end that
-				// declared it: a parent declaring `owned` and the child
-				// declaring `referenced` are one identifying relationship seen
-				// from two sides, so the folded edge stays solid (ADR-0008).
-				e.owned = e.owned || owned
+				e.merge(name, label, owned)
 				folded = true
 				break
 			}

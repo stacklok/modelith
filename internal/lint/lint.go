@@ -601,11 +601,10 @@ func inheritsInvariants(m *model.Model, name string) bool {
 // the renderer would otherwise draw two conflicting edges.
 //
 // Ownership belongs to the relationship, not to the end that declared it, so at
-// most one end may claim `owned`; both claiming it is a contradiction. And when
-// the two ends disagree on ownership, the renderer only reconciles them into
-// one line if they are otherwise the same drawn edge (ADR-0008). When they are
-// not, the diagram shows one solid and one dashed line for what the model calls
-// a single relationship, so that is an error too.
+// most one end may claim `owned`; both claiming it is a contradiction. One end
+// claiming it is the ordinary composition pattern — the renderer folds the two
+// declarations into a single identifying line (ADR-0008), whatever roles the
+// two ends give it.
 //
 // Only pairs with exactly one declaration in each direction are checked.
 // Multiple edges between the same pair (a legitimate pattern — e.g. a User is
@@ -615,7 +614,6 @@ func runReciprocity(m *model.Model, res *Result) {
 	type decl struct {
 		from, to  string
 		card      string
-		role      string
 		owned     bool
 		path      string
 		ownerPath string
@@ -630,7 +628,6 @@ func runReciprocity(m *model.Model, res *Result) {
 				from:      name,
 				to:        rel.Entity,
 				card:      rel.Cardinality,
-				role:      rel.Role,
 				owned:     rel.Ownership == "owned",
 				path:      fmt.Sprintf("/entities/%s/relationships/%d/cardinality", name, i),
 				ownerPath: fmt.Sprintf("/entities/%s/relationships/%d/ownership", name, i),
@@ -690,35 +687,12 @@ func runReciprocity(m *model.Model, res *Result) {
 					f.from, f.to, f.card, r.from, r.to, r.card, model.InvertCardinality(f.card),
 				),
 			})
-			continue // the conflict is the thing to fix; don't pile on
-		}
-
-		// The cardinalities are inverses, so the two ends describe one line. If
-		// they also disagree on ownership, the renderer folds them into a
-		// single solid line only when they carry the same role; otherwise it
-		// draws one solid and one dashed line for the same relationship
-		// (ADR-0008). Say so rather than let the diagram contradict itself.
-		if f.owned != r.owned && normalizeRole(f.role) != normalizeRole(r.role) {
-			owner, other := f, r
-			if r.owned {
-				owner, other = r, f
-			}
-			res.Findings = append(res.Findings, Finding{
-				Severity: SeverityError,
-				Category: CategorySemantic,
-				Path:     owner.ownerPath,
-				Message: fmt.Sprintf(
-					"reciprocal ownership conflict: %s→%s declares ownership \"owned\" but %s→%s does not, and their roles differ (%q vs %q), so the diagram draws one solid and one dashed line for the same relationship — give both ends the same role, or declare the relationship from one end only",
-					owner.from, owner.to, other.from, other.to, owner.role, other.role,
-				),
-			})
 		}
 	}
 }
 
-// normalizeRole reduces a role to the text the diagram labels a line with, so
-// two declarations of one relationship are compared the way the renderer
-// compares them: backticks are markup, and surrounding space is not content.
+// normalizeRole reduces a role to the text the diagram labels a line with:
+// backticks are markup, and surrounding space is not content.
 func normalizeRole(role string) string {
 	return strings.TrimSpace(strings.ReplaceAll(role, "`", ""))
 }

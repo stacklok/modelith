@@ -16,20 +16,27 @@ fakes structure the ER cannot honestly show.
    non-identifying (dashed) `..`. That is standard ER semantics for composition
    and costs no label space.
 2. **Two declarations become one line only when they are one relationship.** The
-   renderer merges a pair of declarations in exactly two cases: an exact
-   duplicate from the same end, and a genuine reciprocal — the same pair,
-   inverse cardinality, the same label, declared from *opposite* ends, with at
-   most one end claiming `owned`. A genuine reciprocal draws solid if either end
-   said `owned`, because ownership belongs to the relationship rather than to
-   the end that named it. Every other case draws both lines, so no declaration
-   disappears from the diagram: two declarations from the same end that differ
-   only in `ownership` are two relationships, and mutual `owned` is a
-   contradiction, not a fold.
+   renderer merges a pair of declarations in exactly two cases: a genuine
+   reciprocal — the same pair, inverse cardinality, declared from *opposite*
+   ends, with at most one end claiming `owned` — and an exact duplicate from the
+   same end. A genuine reciprocal draws solid if either end said `owned`,
+   because ownership belongs to the relationship rather than to the end that
+   named it.
 
-   The contradictions the renderer refuses to swallow are lint **errors**:
-   mutual `owned` from both ends, and a reciprocal pair that disagrees on
-   ownership without folding (their roles differ, so the diagram would draw one
-   solid and one dashed line for the same relationship).
+   **Roles are not part of the predicate.** The two ends of a composition
+   naturally name different roles — a parent's `part` is a child's `whole` —
+   and that is the pattern the fold exists for, not a conflict. The single line
+   is labelled by the owning end's role; with neither end owning, by the role
+   from the end whose entity sorts first, so the choice never depends on
+   iteration order. The other role is dropped from the *diagram* only: the
+   Markdown lists each entity's own relationships, so both roles remain in the
+   document. That is ADR-0002's declaredly lossy view, not information loss.
+
+   Every other case draws both lines, so no declaration disappears: two
+   declarations from the same end that differ in `ownership` or in role are two
+   relationships, and mutual `owned` is a contradiction, not a fold. Mutual
+   `owned` is the one contradiction a reciprocal pair can hold, and it is a lint
+   **error**.
 3. **`role` is the only label.** The `ownership` and `cardinality` fallbacks are
    gone; a relationship with no role gets an empty label. Precise counts already
    live in the Markdown table per ADR-0002, and spending label space on them
@@ -62,9 +69,10 @@ reads: ordinary attributes are omitted, self-relationships are not. Ownership
 becomes visible at a glance across the whole diagram, which makes an incorrect
 `ownership` easier to spot than the old word label did.
 
-Point 2 trades a tidier diagram for an honest one. A model whose two ends
-disagree gets two lines and an error rather than a single line that quietly
-picks a winner — the disagreement is a modeling question only the author can
-settle.
+Point 2 draws two lines where it cannot prove there is one. That is deliberate:
+a diagram that quietly picks a winner among declarations hides a modeling
+question only the author can settle. The one place it does pick — which role
+labels a folded reciprocal — is a label choice inside a single line the model
+does say is one relationship, and the dropped role is still in the Markdown.
 
 Pinned by `TestADR_0008_*` in `internal/render/mermaid` and in `internal/lint`.
