@@ -581,7 +581,7 @@ scenarios:
 // A prose role is the only label on the rendered relationship line (ADR-0008),
 // so it collides with its neighbours in the diagram. The linter steers the
 // prose to `note` — as a warning, never an error.
-func TestProseRoleIsWarning(t *testing.T) {
+func TestADR_0008_ProseRoleIsWarning(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
@@ -590,9 +590,12 @@ func TestProseRoleIsWarning(t *testing.T) {
 	}{
 		{name: "role name", role: "`Owner`", want: false},
 		{name: "two role names", role: "`Owner` or `Member`", want: false},
+		{name: "a comma-separated pair of role names is a list, not prose", role: "`Owner`, `Member`", want: false},
+		{name: "a field accessor is not a sentence", role: "`Project`.owner", want: false},
+		{name: "a version number is not a sentence", role: "v1.0 owner", want: false},
 		{name: "four words", role: "primary contact for escalation", want: false},
 		{name: "five words", role: "the record this one supersedes", want: true},
-		{name: "comma", role: "owner, or member", want: true},
+		{name: "one word too long for a label", role: "pneumonoultramicroscopicsilicovolcanoconiosisadministrator", want: true},
 		{name: "full stop", role: "The owning project.", want: true},
 		{name: "semicolon", role: "owner; also billing", want: true},
 		{name: "empty", role: "", want: false},
@@ -637,6 +640,149 @@ entities:
 			}
 			if res.HasBlocking(false) {
 				t.Error("a prose role is advisory, not blocking")
+			}
+		})
+	}
+}
+
+// TestProseRoleRaisesOneFinding pins that a role produces at most one finding.
+// A prose role that also buries an undefined backticked term used to raise both
+// warnings at the same path; rewriting the role is the fix that comes first and
+// will likely change the term with it.
+func TestProseRoleRaisesOneFinding(t *testing.T) {
+	t.Parallel()
+	src := `
+kind: DomainModel
+version: v1
+entities:
+  Project:
+    definition: A container.
+    relationships:
+      - entity: User
+        cardinality: "n:n"
+        role: "the ` + "`Widget`" + ` this one supersedes"
+  User:
+    definition: A principal.
+`
+	res, err := Run([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var atRole []Finding
+	for _, f := range res.Findings {
+		if f.Path == "/entities/Project/relationships/0/role" {
+			atRole = append(atRole, f)
+		}
+	}
+	if len(atRole) != 1 {
+		t.Fatalf("expected exactly one finding on the role, got %d: %+v", len(atRole), atRole)
+	}
+	if !strings.Contains(atRole[0].Message, "reads as prose") {
+		t.Errorf("expected the prose finding to be the one kept, got %q", atRole[0].Message)
+	}
+}
+
+// TestADR_0008_ReciprocalOwnershipConflictIsError pins the diagnostics half of
+// ADR-0008's fold rule. The renderer folds two declarations into one line only
+// when they are one relationship seen from two sides; the cases it cannot
+// reconcile draw two contradictory lines, so the linter names them instead of
+// letting either the diagram or the fold swallow the disagreement.
+func TestADR_0008_ReciprocalOwnershipConflictIsError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		aOwn, bOwn string
+		aRole      string
+		bRole      string
+		want       string // "" means no ownership finding
+	}{
+		{
+			name: "mutual owned is a contradiction",
+			aOwn: "owned", bOwn: "owned",
+			want: "mutual ownership",
+		},
+		{
+			name: "disagreement the fold cannot resolve, because the roles differ",
+			aOwn: "owned", bOwn: "referenced",
+			aRole: "part", bRole: "whole",
+			want:  "reciprocal ownership conflict",
+		},
+		{
+			name: "disagreement the fold resolves into one solid line",
+			aOwn: "owned", bOwn: "referenced",
+			aRole: "`Part`", bRole: "`Part`",
+			want:  "",
+		},
+		{
+			name: "an omitted ownership on the other end is the same as referenced",
+			aOwn: "owned", bOwn: "",
+			want: "",
+		},
+		{
+			name: "backticks are markup, so the roles still match",
+			aOwn: "owned", bOwn: "referenced",
+			aRole: "`Part`", bRole: "Part",
+			want:  "",
+		},
+		{
+			name: "neither end claims ownership",
+			aOwn: "", bOwn: "",
+			aRole: "part", bRole: "whole",
+			want:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			field := func(name, val string) string {
+				if val == "" {
+					return ""
+				}
+				return "\n        " + name + ": " + strconv.Quote(val)
+			}
+			src := `
+kind: DomainModel
+version: v1
+glossary:
+  Part: "A component."
+entities:
+  Alpha:
+    definition: A container.
+    relationships:
+      - entity: Beta
+        cardinality: "1:n"` + field("ownership", tc.aOwn) + field("role", tc.aRole) + `
+  Beta:
+    definition: A component.
+    relationships:
+      - entity: Alpha
+        cardinality: "n:1"` + field("ownership", tc.bOwn) + field("role", tc.bRole) + `
+`
+			res, err := Run([]byte(src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, msg := range []string{"mutual ownership", "reciprocal ownership conflict"} {
+				got := findingWithMessage(res.Findings, msg)
+				if got != (msg == tc.want) {
+					t.Fatalf("%q finding = %v, want %v; findings: %+v", msg, got, msg == tc.want, res.Findings)
+				}
+			}
+			if tc.want == "" {
+				return
+			}
+			for _, f := range res.Findings {
+				if !strings.Contains(f.Message, tc.want) {
+					continue
+				}
+				if f.Severity != SeverityError || f.Category != CategorySemantic {
+					t.Errorf("expected a semantic error, got %s/%s", f.Severity, f.Category)
+				}
+				if want := "/entities/Alpha/relationships/0/ownership"; f.Path != want {
+					t.Errorf("path = %q, want %q", f.Path, want)
+				}
+			}
+			if !res.HasBlocking(false) {
+				t.Error("an ownership contradiction must block")
 			}
 		})
 	}

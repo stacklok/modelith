@@ -83,6 +83,29 @@ type edge struct {
 	owned    bool
 }
 
+// folds reports whether a declaration made by `from`, with the given ownership,
+// is the same drawn line as e rather than a second one. It is only ever asked
+// about declarations that already agree on the pair, the canonical cardinality
+// (normalized to the sorted-pair orientation, so inverses match) and the label.
+// Two such declarations merge in exactly two cases (ADR-0008):
+//
+//   - the same end declared it twice with the same ownership — an exact
+//     duplicate, which would draw two indistinguishable lines;
+//   - opposite ends declared it and at most one of them claims `owned` — one
+//     relationship seen from two sides, whose ownership belongs to the
+//     relationship rather than to the end that named it.
+//
+// Everything else stays a distinct edge, so no declaration disappears from the
+// diagram: two declarations from the same end differing only in `ownership` are
+// two relationships, and mutual `owned` is a contradiction. `modelith lint`
+// reports the contradictions.
+func (e *edge) folds(from string, owned bool) bool {
+	if e.from == from {
+		return e.owned == owned
+	}
+	return !e.owned || !owned
+}
+
 // ER renders the model as a Mermaid erDiagram. Ordinary attributes are
 // intentionally omitted: their freeform conceptual types (e.g.
 // "enum[active, archived]") aren't valid erDiagram attribute types, so they are
@@ -107,22 +130,23 @@ func ER(m *model.Model) string {
 	}
 
 	var edges []*edge
-	byKey := map[string]*edge{}
+	byKey := map[string][]*edge{}
 	for _, name := range m.EntityNames() {
 		for _, rel := range m.Entities[name].Relationships {
 			if rel.Entity == name {
 				continue // already rendered inside the entity's block
 			}
 			label := relationshipLabel(rel)
+			owned := rel.Ownership == "owned"
 
-			// Dedupe edges declared from both sides of the same pair. The key
-			// includes the cardinality normalized to the sorted-pair
-			// orientation, so a relationship declared from both sides with
-			// inverse cardinalities (A "1:n" B, B "n:1" A) collapses to one
-			// edge — while genuinely distinct edges (GO-3) or contradictory
-			// reciprocal declarations (GO-1) keep distinct keys and both
-			// render, surfacing the conflict instead of silently dropping one.
-			// `modelith lint` reports the contradiction as an error.
+			// Group candidate declarations of one drawn line. The key includes
+			// the cardinality normalized to the sorted-pair orientation, so a
+			// relationship declared from both sides with inverse cardinalities
+			// (A "1:n" B, B "n:1" A) is a candidate to fold — while genuinely
+			// distinct edges (GO-3) or contradictory reciprocal declarations
+			// (GO-1) get distinct keys and both render, surfacing the conflict
+			// instead of silently dropping one. Matching the key is necessary
+			// but not sufficient: edge.folds decides.
 			pair := []string{name, rel.Entity}
 			sort.Strings(pair)
 			card := rel.Cardinality
@@ -134,16 +158,25 @@ func ER(m *model.Model) string {
 			// ("1:n" and "0..n:1") dedupes to one edge.
 			card = model.CanonicalCardinality(card)
 			key := pair[0] + "\x00" + pair[1] + "\x00" + card + "\x00" + label
-			if e, ok := byKey[key]; ok {
+
+			folded := false
+			for _, e := range byKey[key] {
+				if !e.folds(name, owned) {
+					continue
+				}
 				// Ownership belongs to the relationship, not to the end that
 				// declared it: a parent declaring `owned` and the child
 				// declaring `referenced` are one identifying relationship seen
 				// from two sides, so the folded edge stays solid (ADR-0008).
-				e.owned = e.owned || rel.Ownership == "owned"
+				e.owned = e.owned || owned
+				folded = true
+				break
+			}
+			if folded {
 				continue
 			}
-			e := &edge{from: name, to: rel.Entity, card: rel.Cardinality, label: label, owned: rel.Ownership == "owned"}
-			byKey[key] = e
+			e := &edge{from: name, to: rel.Entity, card: rel.Cardinality, label: label, owned: owned}
+			byKey[key] = append(byKey[key], e)
 			edges = append(edges, e)
 		}
 	}
@@ -159,31 +192,39 @@ func ER(m *model.Model) string {
 // edge from an entity to itself draws a runaway arc that swamps the canvas
 // (issue #26); the row carries the same information without a line (ADR-0008).
 // Row names are self, self2, self3… — distinct, since Mermaid does not
-// disambiguate two attributes sharing a name.
+// disambiguate two attributes sharing a name. Declarations that would render
+// the same row are emitted once: two indistinguishable rows carry no more
+// information than one.
 func selfRows(name string, rels []model.Relationship) []string {
 	var rows []string
+	seen := map[string]bool{}
 	for _, rel := range rels {
 		if rel.Entity != name {
 			continue
 		}
+		comment := selfComment(rel)
+		if seen[comment] {
+			continue
+		}
+		seen[comment] = true
 		attr := "self"
 		if n := len(rows) + 1; n > 1 {
 			attr = "self" + strconv.Itoa(n)
 		}
-		rows = append(rows, fmt.Sprintf("%s %s %q", name, attr, selfComment(rel)))
+		rows = append(rows, fmt.Sprintf("%s %s %q", name, attr, comment))
 	}
 	return rows
 }
 
-// selfComment is the comment column of a self-relationship row: the target-side
+// selfComment is the comment column of a self-relationship row: the declared
 // cardinality, the ownership when owned (the line style that carries it
 // elsewhere has no line here), then the role.
+//
+// Both sides of the cardinality are shown. The row stands in for an edge whose
+// two end markers encoded both ends, so showing only the target side would drop
+// the declaring side — the one piece of information the row exists to preserve.
 func selfComment(rel model.Relationship) string {
-	target := rel.Cardinality
-	if _, right, ok := strings.Cut(rel.Cardinality, ":"); ok {
-		target = right
-	}
-	out := target
+	out := rel.Cardinality
 	if rel.Ownership == "owned" {
 		out += " owned"
 	}
@@ -202,14 +243,19 @@ func relationshipLabel(rel model.Relationship) string {
 
 // sanitize strips or replaces characters that would break a quoted Mermaid
 // label. Square brackets are replaced with parentheses because Mermaid uses
-// them for node/attribute syntax; backticks and quotes are neutralized and
-// newlines collapsed. Entity names interpolated elsewhere are constrained to
-// PascalCase by the schema, so they need no escaping.
+// them for node/attribute syntax; backticks, quotes and backslashes are
+// neutralized and newlines collapsed. Dropping the backslash also keeps the %q
+// the callers emit with from doubling it into a visible "\\". Entity names
+// interpolated elsewhere are constrained to PascalCase by the schema, so they
+// need no escaping.
 func sanitize(s string) string {
 	s = strings.ReplaceAll(s, "`", "")
 	s = strings.ReplaceAll(s, "\"", "'")
+	s = strings.ReplaceAll(s, "\\", "")
 	s = strings.ReplaceAll(s, "[", "(")
 	s = strings.ReplaceAll(s, "]", ")")
 	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
 	return strings.TrimSpace(s)
 }

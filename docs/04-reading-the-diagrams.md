@@ -27,9 +27,9 @@ with no rows inside it:
 
 ```mermaid
 erDiagram
+    Policy {}
     Project {}
     User {}
-    Policy {}
 ```
 
 Three entities, no connections drawn yet. In a generic ER diagram a box would
@@ -127,7 +127,20 @@ the `Users` on it — dashed; deleting the `Project` doesn't delete the `Users`.
 Ownership belongs to the relationship, not to the end that declared it. If a
 `Project` says it owns its `Policies` and the `Policy` says it references its
 `Project`, that's one identifying relationship seen from both ends, so it draws
-as a single solid line.
+as a single solid line — provided the two declarations otherwise match (inverse
+cardinalities and the same role). That is the only merge the renderer makes on
+ownership. Two declarations it can't reconcile stay two lines, so nothing you
+wrote vanishes from the picture:
+
+- If both ends claim `owned`, that's a contradiction — a relationship is owned
+  by at most one end. Both lines draw, and `modelith lint` reports it as an
+  error.
+- If the two ends disagree on ownership but give the relationship different
+  roles, the renderer can't tell whether you meant one relationship or two.
+  Both lines draw, and `modelith lint` reports that as an error too. Give both
+  ends the same role, or declare the relationship from one end only.
+- If one entity declares two relationships to the same entity that differ only
+  in `ownership`, those are two relationships, and both draw.
 
 ## The labels on the lines
 
@@ -155,17 +168,19 @@ that entity's box** rather than as a line looping back on it:
 
 ```mermaid
 erDiagram
-    Project {
-        Project self "0..1 — Predecessor"
-    }
     Policy {}
+    Project {
+        Project self "1:0..1 — Predecessor"
+    }
     Project ||--o{ Policy : ""
 ```
 
-Read the row as: this `Project` relates to `0..1` other `Project`, which plays
+Read the row as: one `Project` relates to `0..1` other `Project`, which plays
 the role `Predecessor`. Because there's no line to carry it, the row spells out
-the cardinality, the word `owned` when the relationship is owned, and the role.
-An entity with several self-relationships gets one row each (`self`, `self2`, …).
+the declared cardinality in full — both sides, since the two ends of a line are
+what the row replaces — the word `owned` when the relationship is owned, and the
+role. An entity with several self-relationships gets one row each (`self`,
+`self2`, …).
 
 This is a layout necessity, not a modeling statement: Mermaid's ER layout has no
 self-loop handling and draws an arc that swamps the rest of the diagram. See
@@ -193,7 +208,7 @@ Here is the diagram modelith renders for the [worked example](https://github.com
 erDiagram
     Policy {}
     Project {
-        Project self "0..1 — Predecessor"
+        Project self "1:0..1 — Predecessor"
     }
     User {}
     Policy }o--|| Project : ""
@@ -207,7 +222,8 @@ Reading it:
   die with it. The example declares this relationship from *both* entities
   (`Project` owns `Policy`; `Policy` references its `Project`) — one
   relationship seen from two ends, so it draws once. The two declarations must
-  agree on cardinality, or `modelith lint` flags a contradiction.
+  agree — inverse cardinalities, the same role, and at most one end claiming
+  `owned` — or `modelith lint` flags the contradiction and both lines draw.
 - **`Project }o..o{ User : "Owner or Member"`** — many-to-many between
   `Projects` and `Users` on a **dashed** line: a `User`'s role is `Owner` or
   `Member`, and neither entity is part of the other.

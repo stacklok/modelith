@@ -91,7 +91,7 @@ A human principal who can own or belong to `Projects`. Identity is managed exter
 erDiagram
     Policy {}
     Project {
-        Project self "0..1 — Predecessor"
+        Project self "1:0..1 — Predecessor"
     }
     User {}
     Policy }o--|| Project : ""

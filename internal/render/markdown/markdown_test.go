@@ -104,6 +104,26 @@ func TestRenderEntity_DerivedMarker(t *testing.T) {
 	}
 }
 
+// TestRenderEntity_SymmetricRelationship pins where a `symmetric` marker
+// surfaces. The ER diagram has no notation for it (ADR-0008 leaves the line to
+// ownership and the label to the role), so the Markdown relationship line is
+// the only place a reader sees it.
+func TestRenderEntity_SymmetricRelationship(t *testing.T) {
+	m := &model.Model{Entities: map[string]model.Entity{
+		"Node": {Definition: "A node.", Relationships: []model.Relationship{
+			{Entity: "Node", Cardinality: "n:n", Symmetric: true, Role: "`Peer`"},
+			{Entity: "Node", Cardinality: "1:0..1", Role: "`Predecessor`"},
+		}},
+	}}
+	got := Render(m)
+	if want := "- `Node` — n:n — symmetric — `Peer`\n"; !strings.Contains(got, want) {
+		t.Fatalf("expected a symmetric marker %q, got:\n%s", want, got)
+	}
+	if want := "- `Node` — 1:0..1 — `Predecessor`\n"; !strings.Contains(got, want) {
+		t.Fatalf("expected no marker on a non-symmetric relationship %q, got:\n%s", want, got)
+	}
+}
+
 // TestGoldenExample renders the committed example and compares it to the
 // checked-in Markdown. This is the same invariant `modelith render --check` enforces
 // in CI: if you change the renderer or the example YAML, regenerate the .md.

@@ -303,6 +303,11 @@ func runSemantic(m *model.Model, res *Result) {
 			// A prose role wrecks the diagram: it is the only label on the
 			// rendered relationship line (ADR-0008), so a sentence there
 			// collides with its neighbours. `note` is the field for prose.
+			//
+			// One role raises one finding. Rewriting a prose role is the fix
+			// that comes first, and the terms buried in the sentence are likely
+			// to change with it, so the undefined-term check waits until the
+			// role is a role name.
 			if readsAsProse(rel.Role) {
 				res.Findings = append(res.Findings, Finding{
 					Severity: SeverityWarning,
@@ -313,19 +318,21 @@ func runSemantic(m *model.Model, res *Result) {
 						rel.Role,
 					),
 				})
-			}
-			// A role names a non-entity vocabulary term; it should resolve to an
-			// entity or a glossary term (the DDD-1 payoff — undefined roles).
-			for _, base := range entityRefs(rel.Role) {
-				if allowed[base] != "" || glossary[base] {
-					continue
+			} else {
+				// A role names a non-entity vocabulary term; it should resolve
+				// to an entity or a glossary term (the DDD-1 payoff — undefined
+				// roles).
+				for _, base := range entityRefs(rel.Role) {
+					if allowed[base] != "" || glossary[base] {
+						continue
+					}
+					res.Findings = append(res.Findings, Finding{
+						Severity: SeverityWarning,
+						Category: CategorySemantic,
+						Path:     fmt.Sprintf("/entities/%s/relationships/%d/role", name, i),
+						Message:  fmt.Sprintf("role term %q is not a defined entity or glossary term — define it in the glossary", base),
+					})
 				}
-				res.Findings = append(res.Findings, Finding{
-					Severity: SeverityWarning,
-					Category: CategorySemantic,
-					Path:     fmt.Sprintf("/entities/%s/relationships/%d/role", name, i),
-					Message:  fmt.Sprintf("role term %q is not a defined entity or glossary term — define it in the glossary", base),
-				})
 			}
 		}
 	}
@@ -586,10 +593,19 @@ func inheritsInvariants(m *model.Model, name string) bool {
 	return false
 }
 
-// runReciprocity checks that a relationship declared from both sides agrees:
+// runReciprocity checks that a relationship declared from both sides agrees, on
+// cardinality and on ownership.
+//
 // B→A must declare the inverse of A→B's cardinality. A contradiction (e.g. A
 // says "1:n" B while B says "1:1" A) is an error — the model can't be both, and
 // the renderer would otherwise draw two conflicting edges.
+//
+// Ownership belongs to the relationship, not to the end that declared it, so at
+// most one end may claim `owned`; both claiming it is a contradiction. And when
+// the two ends disagree on ownership, the renderer only reconciles them into
+// one line if they are otherwise the same drawn edge (ADR-0008). When they are
+// not, the diagram shows one solid and one dashed line for what the model calls
+// a single relationship, so that is an error too.
 //
 // Only pairs with exactly one declaration in each direction are checked.
 // Multiple edges between the same pair (a legitimate pattern — e.g. a User is
@@ -597,9 +613,12 @@ func inheritsInvariants(m *model.Model, name string) bool {
 // they're left alone rather than guessed at.
 func runReciprocity(m *model.Model, res *Result) {
 	type decl struct {
-		from, to string
-		card     string
-		path     string
+		from, to  string
+		card      string
+		role      string
+		owned     bool
+		path      string
+		ownerPath string
 	}
 	byPair := map[string][]decl{}
 	for _, name := range m.EntityNames() {
@@ -608,10 +627,13 @@ func runReciprocity(m *model.Model, res *Result) {
 			sort.Strings(pair)
 			k := pair[0] + "\x00" + pair[1]
 			byPair[k] = append(byPair[k], decl{
-				from: name,
-				to:   rel.Entity,
-				card: rel.Cardinality,
-				path: fmt.Sprintf("/entities/%s/relationships/%d/cardinality", name, i),
+				from:      name,
+				to:        rel.Entity,
+				card:      rel.Cardinality,
+				role:      rel.Role,
+				owned:     rel.Ownership == "owned",
+				path:      fmt.Sprintf("/entities/%s/relationships/%d/cardinality", name, i),
+				ownerPath: fmt.Sprintf("/entities/%s/relationships/%d/ownership", name, i),
 			})
 		}
 	}
@@ -633,6 +655,21 @@ func runReciprocity(m *model.Model, res *Result) {
 			continue
 		}
 		f, r := fwd[0], rev[0]
+
+		// Mutual ownership is a contradiction whatever the cardinalities say,
+		// so it is checked before they are parsed.
+		if f.owned && r.owned {
+			res.Findings = append(res.Findings, Finding{
+				Severity: SeverityError,
+				Category: CategorySemantic,
+				Path:     f.ownerPath,
+				Message: fmt.Sprintf(
+					"mutual ownership: %s→%s and %s→%s both declare ownership \"owned\" — a relationship is owned by at most one end, so make the other end \"referenced\" (or omit it)",
+					f.from, f.to, r.from, r.to,
+				),
+			})
+		}
+
 		// Reciprocity is checked only for structurally valid cardinalities; an
 		// invalid one is already reported (by the schema, and by
 		// runRelationshipShape). Compare the parsed multiplicities, not the raw
@@ -653,8 +690,37 @@ func runReciprocity(m *model.Model, res *Result) {
 					f.from, f.to, f.card, r.from, r.to, r.card, model.InvertCardinality(f.card),
 				),
 			})
+			continue // the conflict is the thing to fix; don't pile on
+		}
+
+		// The cardinalities are inverses, so the two ends describe one line. If
+		// they also disagree on ownership, the renderer folds them into a
+		// single solid line only when they carry the same role; otherwise it
+		// draws one solid and one dashed line for the same relationship
+		// (ADR-0008). Say so rather than let the diagram contradict itself.
+		if f.owned != r.owned && normalizeRole(f.role) != normalizeRole(r.role) {
+			owner, other := f, r
+			if r.owned {
+				owner, other = r, f
+			}
+			res.Findings = append(res.Findings, Finding{
+				Severity: SeverityError,
+				Category: CategorySemantic,
+				Path:     owner.ownerPath,
+				Message: fmt.Sprintf(
+					"reciprocal ownership conflict: %s→%s declares ownership \"owned\" but %s→%s does not, and their roles differ (%q vs %q), so the diagram draws one solid and one dashed line for the same relationship — give both ends the same role, or declare the relationship from one end only",
+					owner.from, owner.to, other.from, other.to, owner.role, other.role,
+				),
+			})
 		}
 	}
+}
+
+// normalizeRole reduces a role to the text the diagram labels a line with, so
+// two declarations of one relationship are compared the way the renderer
+// compares them: backticks are markup, and surrounding space is not content.
+func normalizeRole(role string) string {
+	return strings.TrimSpace(strings.ReplaceAll(role, "`", ""))
 }
 
 func runCompleteness(m *model.Model, res *Result) {
@@ -805,16 +871,30 @@ func entityRefs(text string) []string {
 	return out
 }
 
+// roleLabelMax is the longest a role may be before it crowds the diagram line
+// it labels, whatever its shape. Measured in runes, so a non-ASCII role is not
+// judged by its byte count.
+const roleLabelMax = 40
+
 // readsAsProse reports whether a relationship role is written as a sentence
-// rather than a role name. The heuristic is deliberately loose — more than four
-// words, or sentence punctuation — because it only ever raises a warning:
-// "`Owner` or `Member`" passes, "the record this one supersedes" does not.
+// rather than a role name. It judges the role as the diagram will draw it, so
+// backticks — markup, not label text — come off first.
+//
+// Three signals, each of which alone wrecks a diagram label: too long, too many
+// words, or a sentence terminator. Sentence punctuation is deliberately *not*
+// tested character-by-character: a comma separates a short list of role names
+// ("`Owner`, `Member`"), and a full stop is as likely to be an accessor
+// ("`Project`.owner") or a version ("v1.0 owner") as the end of a sentence.
+// "`Owner` or `Member`" passes; "the record this one supersedes" does not.
 func readsAsProse(role string) bool {
-	role = strings.TrimSpace(role)
+	role = normalizeRole(role)
 	if role == "" {
 		return false
 	}
-	if strings.ContainsAny(role, ",.;") {
+	if len([]rune(role)) > roleLabelMax {
+		return true
+	}
+	if strings.Contains(role, ";") || strings.HasSuffix(role, ".") {
 		return true
 	}
 	return len(strings.Fields(role)) > 4

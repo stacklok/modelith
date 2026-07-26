@@ -14,20 +14,35 @@ fakes structure the ER cannot honestly show.
 1. **`ownership` is the line style.** `owned` draws the identifying (solid)
    connector `--`; `referenced` and an omitted `ownership` draw the
    non-identifying (dashed) `..`. That is standard ER semantics for composition
-   and costs no label space. Ownership is a property of the relationship, not of
-   the end that declared it, so when a parent's `owned` and a child's
-   `referenced` fold into one edge, the folded edge stays solid.
-2. **`role` is the only label.** The `ownership` and `cardinality` fallbacks are
+   and costs no label space.
+2. **Two declarations become one line only when they are one relationship.** The
+   renderer merges a pair of declarations in exactly two cases: an exact
+   duplicate from the same end, and a genuine reciprocal — the same pair,
+   inverse cardinality, the same label, declared from *opposite* ends, with at
+   most one end claiming `owned`. A genuine reciprocal draws solid if either end
+   said `owned`, because ownership belongs to the relationship rather than to
+   the end that named it. Every other case draws both lines, so no declaration
+   disappears from the diagram: two declarations from the same end that differ
+   only in `ownership` are two relationships, and mutual `owned` is a
+   contradiction, not a fold.
+
+   The contradictions the renderer refuses to swallow are lint **errors**:
+   mutual `owned` from both ends, and a reciprocal pair that disagrees on
+   ownership without folding (their roles differ, so the diagram would draw one
+   solid and one dashed line for the same relationship).
+3. **`role` is the only label.** The `ownership` and `cardinality` fallbacks are
    gone; a relationship with no role gets an empty label. Precise counts already
    live in the Markdown table per ADR-0002, and spending label space on them
    crowds out the roles. A semantic lint *warning* (never an error) fires when a
-   role reads as prose — more than four words, or sentence punctuation — and
-   names `note` as the field for the explanation.
-3. **A self-referential relationship is a row inside the entity's block**, not
-   an edge: `Project self "0..1 — Predecessor"`. The row carries the target-side
-   cardinality, the word `owned` when owned (there is no line to carry it), and
-   the role. Rows are named `self`, `self2`, … because Mermaid does not
-   disambiguate two attributes sharing a name.
+   role reads as prose — too long for a label, more than four words, or a
+   sentence terminator — and names `note` as the field for the explanation.
+4. **A self-referential relationship is a row inside the entity's block**, not
+   an edge: `Project self "1:0..1 — Predecessor"`. The row carries the declared
+   cardinality (both sides — the edge it replaces encoded both in its two end
+   markers), the word `owned` when owned (there is no line to carry it), and the
+   role. Rows are named `self`, `self2`, … because Mermaid does not
+   disambiguate two attributes sharing a name; declarations that would render an
+   identical row are emitted once.
 
 ## Evidence
 
@@ -41,11 +56,15 @@ for both renderers.
 
 ## Consequences
 
-Point 3 is the one place a *relationship* is drawn inside a box, so the
+Point 4 is the one place a *relationship* is drawn inside a box, so the
 "attributes are intentionally omitted from the diagram" rule from ADR-0002 now
 reads: ordinary attributes are omitted, self-relationships are not. Ownership
 becomes visible at a glance across the whole diagram, which makes an incorrect
 `ownership` easier to spot than the old word label did.
 
-Pinned by `TestADR_0008_*` in `internal/render/mermaid` and `TestProseRoleIsWarning`
-in `internal/lint`.
+Point 2 trades a tidier diagram for an honest one. A model whose two ends
+disagree gets two lines and an error rather than a single line that quietly
+picks a winner — the disagreement is a modeling question only the author can
+settle.
+
+Pinned by `TestADR_0008_*` in `internal/render/mermaid` and in `internal/lint`.

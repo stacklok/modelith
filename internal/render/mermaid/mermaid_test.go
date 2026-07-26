@@ -149,6 +149,7 @@ func TestADR_0008_OwnershipIsLineStyle(t *testing.T) {
 // it, so a parent's `owned` and the child's `referenced` fold into one solid
 // edge rather than a contradictory solid-plus-dashed pair.
 func TestADR_0008_OwnershipFoldsAcrossDeclarations(t *testing.T) {
+	t.Parallel()
 	m := &model.Model{Entities: map[string]model.Entity{
 		"Parent": {Definition: "p", Relationships: []model.Relationship{{Entity: "Child", Cardinality: "1:n", Ownership: "owned"}}},
 		"Child":  {Definition: "c", Relationships: []model.Relationship{{Entity: "Parent", Cardinality: "n:1", Ownership: "referenced"}}},
@@ -159,6 +160,85 @@ func TestADR_0008_OwnershipFoldsAcrossDeclarations(t *testing.T) {
 	}
 	if n := strings.Count(out, " Parent : "); n != 1 {
 		t.Errorf("expected one edge between the pair, got %d:\n%s", n, out)
+	}
+}
+
+// TestADR_0008_FoldsOnlyGenuineReciprocals pins the fold predicate of ADR-0008.
+// Two declarations become one line only when they are one relationship seen
+// from two sides — opposite ends, inverse cardinality, the same label, and at
+// most one end claiming `owned` — or when one is an exact duplicate of the
+// other. Everything else draws both lines, so no declaration vanishes.
+func TestADR_0008_FoldsOnlyGenuineReciprocals(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		a, b  model.Relationship // a declared by A; b declared by B unless bFromA
+		bFrom string             // entity that declares b: "A" or "B"
+		want  []string
+	}{
+		{
+			name:  "opposite ends, one owned: one solid line",
+			a:     model.Relationship{Entity: "B", Cardinality: "1:n", Ownership: "owned"},
+			b:     model.Relationship{Entity: "A", Cardinality: "n:1", Ownership: "referenced"},
+			bFrom: "B",
+			want:  []string{"    A ||--o{ B : \"\"\n"},
+		},
+		{
+			name:  "opposite ends, neither owned: one dashed line",
+			a:     model.Relationship{Entity: "B", Cardinality: "1:n"},
+			b:     model.Relationship{Entity: "A", Cardinality: "n:1"},
+			bFrom: "B",
+			want:  []string{"    A ||..o{ B : \"\"\n"},
+		},
+		{
+			name:  "opposite ends, both owned: a contradiction, so both lines draw",
+			a:     model.Relationship{Entity: "B", Cardinality: "1:n", Ownership: "owned"},
+			b:     model.Relationship{Entity: "A", Cardinality: "n:1", Ownership: "owned"},
+			bFrom: "B",
+			want:  []string{"    A ||--o{ B : \"\"\n", "    B }o--|| A : \"\"\n"},
+		},
+		{
+			name:  "same end, ownership differs: two relationships, so both lines draw",
+			a:     model.Relationship{Entity: "B", Cardinality: "1:n", Ownership: "owned"},
+			b:     model.Relationship{Entity: "B", Cardinality: "1:n", Ownership: "referenced"},
+			bFrom: "A",
+			want:  []string{"    A ||--o{ B : \"\"\n", "    A ||..o{ B : \"\"\n"},
+		},
+		{
+			name:  "same end, identical: an exact duplicate draws once",
+			a:     model.Relationship{Entity: "B", Cardinality: "1:n", Ownership: "owned"},
+			b:     model.Relationship{Entity: "B", Cardinality: "1:n", Ownership: "owned"},
+			bFrom: "A",
+			want:  []string{"    A ||--o{ B : \"\"\n"},
+		},
+		{
+			name:  "opposite ends, roles differ: two labels, so both lines draw",
+			a:     model.Relationship{Entity: "B", Cardinality: "1:n", Ownership: "owned", Role: "part"},
+			b:     model.Relationship{Entity: "A", Cardinality: "n:1", Role: "whole"},
+			bFrom: "B",
+			want:  []string{"    A ||--o{ B : \"part\"\n", "    B }o..|| A : \"whole\"\n"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := model.Entity{Definition: "a", Relationships: []model.Relationship{tc.a}}
+			b := model.Entity{Definition: "b"}
+			if tc.bFrom == "A" {
+				a.Relationships = append(a.Relationships, tc.b)
+			} else {
+				b.Relationships = []model.Relationship{tc.b}
+			}
+			out := ER(&model.Model{Entities: map[string]model.Entity{"A": a, "B": b}})
+			if n := strings.Count(out, " : "); n != len(tc.want) {
+				t.Errorf("expected %d edge(s), got %d:\n%s", len(tc.want), n, out)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("expected edge %q; got:\n%s", want, out)
+				}
+			}
+		})
 	}
 }
 
@@ -174,7 +254,7 @@ func TestADR_0008_SelfRelationshipRendersInEntityBlock(t *testing.T) {
 		"Note": {Definition: "n"},
 	}}
 	out := ER(m)
-	want := "    Record {\n        Record self \"0..1 — Predecessor\"\n    }\n"
+	want := "    Record {\n        Record self \"1:0..1 — Predecessor\"\n    }\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("expected self-relationship row %q; got:\n%s", want, out)
 	}
@@ -186,7 +266,13 @@ func TestADR_0008_SelfRelationshipRendersInEntityBlock(t *testing.T) {
 	}
 }
 
-func TestERSelfRelationshipRowContents(t *testing.T) {
+// TestADR_0008_SelfRowCarriesBothCardinalitySides pins the no-information-loss
+// half of ADR-0008's in-box rows: the row replaces an edge whose two end
+// markers encoded both sides of the cardinality, so the row shows both. The
+// declaring side is exactly what a target-side-only row would drop — "1:n" and
+// "0..5:1" would both collapse to their right-hand side alone.
+func TestADR_0008_SelfRowCarriesBothCardinalitySides(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		rel  model.Relationship
@@ -195,22 +281,32 @@ func TestERSelfRelationshipRowContents(t *testing.T) {
 		{
 			name: "cardinality only",
 			rel:  model.Relationship{Entity: "Record", Cardinality: "1:n"},
-			want: `Record self "n"`,
+			want: `Record self "1:n"`,
+		},
+		{
+			name: "a bounded declaring side survives",
+			rel:  model.Relationship{Entity: "Record", Cardinality: "0..5:1"},
+			want: `Record self "0..5:1"`,
 		},
 		{
 			name: "owned is spelled out, since there is no line to carry it",
 			rel:  model.Relationship{Entity: "Record", Cardinality: "1:n", Ownership: "owned", Role: "`Part`"},
-			want: `Record self "n owned — Part"`,
+			want: `Record self "1:n owned — Part"`,
 		},
 		{
 			name: "referenced stays implicit, matching the dashed default",
 			rel:  model.Relationship{Entity: "Record", Cardinality: "1:0..1", Ownership: "referenced", Role: "Predecessor"},
-			want: `Record self "0..1 — Predecessor"`,
+			want: `Record self "1:0..1 — Predecessor"`,
 		},
 		{
 			name: "a quote in the role cannot break out of the comment",
 			rel:  model.Relationship{Entity: "Record", Cardinality: "n:n", Role: `a "quoted" [role]`},
-			want: `Record self "n — a 'quoted' (role)"`,
+			want: `Record self "n:n — a 'quoted' (role)"`,
+		},
+		{
+			name: "a backslash in the role is dropped, not doubled by %q",
+			rel:  model.Relationship{Entity: "Record", Cardinality: "n:n", Role: `a\b`},
+			want: `Record self "n:n — ab"`,
 		},
 		{
 			name: "a cardinality with no colon is shown whole",
@@ -220,6 +316,7 @@ func TestERSelfRelationshipRowContents(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := &model.Model{Entities: map[string]model.Entity{
 				"Record": {Definition: "r", Relationships: []model.Relationship{tc.rel}},
 			}}
@@ -233,20 +330,43 @@ func TestERSelfRelationshipRowContents(t *testing.T) {
 // TestERMultipleSelfRelationships guards the row names: Mermaid does not
 // disambiguate two attributes sharing a name, so each row gets its own.
 func TestERMultipleSelfRelationships(t *testing.T) {
+	t.Parallel()
 	m := &model.Model{Entities: map[string]model.Entity{
 		"Record": {Definition: "r", Relationships: []model.Relationship{
 			{Entity: "Record", Cardinality: "1:0..1", Role: "`Predecessor`"},
 			{Entity: "Record", Cardinality: "1:n", Ownership: "owned", Role: "`Part`"},
-			{Entity: "Record", Cardinality: "n:n", Symmetric: true, Role: "`Peer`"},
+			{Entity: "Record", Cardinality: "n:n", Role: "`Peer`"},
 		}},
 	}}
 	want := "    Record {\n" +
-		"        Record self \"0..1 — Predecessor\"\n" +
-		"        Record self2 \"n owned — Part\"\n" +
-		"        Record self3 \"n — Peer\"\n" +
+		"        Record self \"1:0..1 — Predecessor\"\n" +
+		"        Record self2 \"1:n owned — Part\"\n" +
+		"        Record self3 \"n:n — Peer\"\n" +
 		"    }\n"
 	if out := ER(m); !strings.Contains(out, want) {
 		t.Errorf("expected distinct self rows:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+// TestERSelfRelationshipsDedupe guards the row list against a declaration
+// repeated verbatim: two rows that would read identically carry no more than
+// one, and the numbering stays contiguous. Rows that differ in any rendered
+// part are kept, since the reader can tell them apart.
+func TestERSelfRelationshipsDedupe(t *testing.T) {
+	t.Parallel()
+	m := &model.Model{Entities: map[string]model.Entity{
+		"Record": {Definition: "r", Relationships: []model.Relationship{
+			{Entity: "Record", Cardinality: "0..1:0..1", Role: "`Predecessor`"},
+			{Entity: "Record", Cardinality: "0..1:0..1", Role: "`Predecessor`"},
+			{Entity: "Record", Cardinality: "0..1:0..1", Ownership: "owned", Role: "`Predecessor`"},
+		}},
+	}}
+	want := "    Record {\n" +
+		"        Record self \"0..1:0..1 — Predecessor\"\n" +
+		"        Record self2 \"0..1:0..1 owned — Predecessor\"\n" +
+		"    }\n"
+	if out := ER(m); !strings.Contains(out, want) {
+		t.Errorf("expected deduped self rows:\n%s\ngot:\n%s", want, out)
 	}
 }
 

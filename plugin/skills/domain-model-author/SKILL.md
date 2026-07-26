@@ -113,7 +113,9 @@ Follow the format exactly (see the schema reference). Key conventions:
 - `cardinality` is one of `1:1`, `1:n`, `n:1`, `n:n`. If you declare the same
   relationship from both entities, the two cardinalities must be inverses
   (`1:n` ⇄ `n:1`; `1:1`/`n:n` symmetric) — a contradiction is a lint **error**.
-  Declaring it from one side only is fine and usually clearer.
+  So is a pair where both ends claim `ownership: owned`, or where the ends
+  disagree on ownership under different roles. Declaring it from one side only
+  is fine and usually clearer.
 - **`role` is a short role name** (`` `Owner` ``, `` `Predecessor` ``), not a
   sentence: it is the only label drawn on the diagram line, so prose there
   collides with neighbouring lines and warns. Put the explanation in `note`.
