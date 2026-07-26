@@ -19,7 +19,8 @@ few hundred lines, goes through this loop:
 
 1. Launch a subagent (`Agent` tool, `isolation: "worktree"`) to implement the
    change on its own branch.
-2. Run `/code-review` against the resulting diff.
+2. Review the resulting diff. `/code-review` is user-invoked and an agent
+   cannot launch it — see "Who runs the review" below for what to do instead.
 3. Fix what the review finds via a separate fix subagent, not by hand-editing
    the result inline.
 4. Repeat review then fix for up to three rounds. Record each round's findings
@@ -29,6 +30,31 @@ few hundred lines, goes through this loop:
    regardless.
 5. If the cap is hit with real issues still open, say so plainly in the final
    round's record. Never quietly declare the change done.
+
+## Who runs the review
+
+`/code-review` is triggered by the user and billed to them. An agent cannot run
+it — not through the Skill tool, not through Bash, not by any workaround. Step 2
+therefore resolves one of two ways, and the round record must say which.
+
+**Working synchronously**, with the user present: prompt them to run it, and say
+which tier the change warrants and why. Wait for the findings rather than
+reviewing around them. This is the better path — it is the real thing, and the
+user is already the one who decides what merges.
+
+**Running autonomously**, or when the user would rather not be interrupted:
+approximate it, and never describe the approximation as if `/code-review` ran.
+The approximation is:
+
+- Independent reviewer subagents, one per finder angle the change warrants (see
+  the tiers below), each held to the evidence standard in this document.
+- The adversarial pass, which needs no slash command and is the highest-yield
+  finder for a format tool: build the real binary and run it against hostile
+  fixtures, base against change.
+
+Offer the branch or PR afterwards so the user can run the real review when it
+suits them. An approximated round is a reason to keep a pull request in draft
+if the change is correctness-critical and the user has not yet looked.
 
 ## Draft until vetted
 
@@ -52,17 +78,19 @@ draft open and says so plainly.
 ## Scale round one to the change
 
 The full fan-out is not the default. Match the first round's depth to what the
-change puts at risk:
+change puts at risk. The tier names the depth, whichever path step 2 took: it is
+the argument to `/code-review` when the user runs it, and the number of finder
+angles to cover when approximating.
 
-- **Full round** (`/code-review high`, all finder angles): changes touching
+- **Full round** (`high`, all finder angles): changes touching
   correctness-critical surfaces — the schema and its sync with the model
   structs, the version registry and dispatch, the lint rules (structural,
   semantic, completeness), the Markdown and Mermaid renderers and their
   deterministic output, or the release and Action plumbing. Also for diffs
   beyond a few hundred lines, new mechanisms, or new dependencies.
-- **Reduced round** (`/code-review medium`): everything else. The cleanup
-  angles (reuse, simplification, efficiency) earn their tokens only in a full
-  round; `/simplify` covers them on demand.
+- **Reduced round** (`medium`): everything else. The cleanup angles (reuse,
+  simplification, efficiency) earn their tokens only in a full round;
+  `/simplify` covers them on demand.
 - **Docs-only diffs**: one reviewer pass. For a schema-reference or format doc
   that pass includes a lifecycle walkthrough: take every format concept the
   doc introduces and walk it through authoring, linting, and rendering from a
@@ -74,7 +102,7 @@ references, dangling enum types, completeness gaps), comparing base against the
 change. For a format tool it is consistently the highest-yield finder.
 
 Attribute every finding in the round record to the angle or agent that sourced
-it.
+it, and record whether the round was a real `/code-review` or an approximation.
 
 ## Evidence standards
 
