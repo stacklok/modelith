@@ -344,10 +344,11 @@ Six rules are worth knowing before you use this:
   your project extends, so it assumes the least, and even a sibling directory
   is out of reach.
 
-Rendered Markdown names each import and links it to that model's rendered `.md`,
-and a qualified type links straight to the item's heading there. The renderer
-never opens an imported file, so a link points at where the Markdown *would* be:
-render the imported model too, or the link dangles.
+Rendered Markdown names each import, shows the path as written, and links
+separately to that model's rendered `.md`; a qualified type links straight to
+the item's heading there. The renderer never opens an imported file, so a link
+points at where the Markdown *would* be: render the imported model too, or the
+link dangles.
 
 The linter reports a qualified type that doesn't resolve as an **error**, while
 an *unqualified* PascalCase type that names no enum is only a **warning**. The

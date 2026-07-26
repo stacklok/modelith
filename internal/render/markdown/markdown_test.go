@@ -181,8 +181,11 @@ func TestRenderImports_SectionAndLinkedTypes(t *testing.T) {
 
 	for _, want := range []string{
 		"## Imports\n",
-		"- **`payments`** — [../payments/payments.modelith.yaml](../payments/payments.modelith.md)\n",
-		"- **`billing`** — [./legacy/pay-v2.modelith.yaml](./legacy/pay-v2.modelith.md)\n",
+		// The source path is the model file; the link leads to the rendered
+		// Markdown beside it. Labelling the link with the .yaml path pointed the
+		// reader at a file they would not land on.
+		"- **`payments`** — `../payments/payments.modelith.yaml` ([rendered](../payments/payments.modelith.md))\n",
+		"- **`billing`** — `./legacy/pay-v2.modelith.yaml` ([rendered](./legacy/pay-v2.modelith.md))\n",
 		"| `paidWith` | [payments.PaymentMethod](../payments/payments.modelith.md#paymentmethod) |  |\n",
 		"| `plan` | [billing.Plan](./legacy/pay-v2.modelith.md#plan) |  |\n",
 		// A scope no import binds is a lint error; the renderer states it rather
@@ -231,16 +234,19 @@ func TestRenderImports_HostilePathCannotEscapeItsMarkup(t *testing.T) {
 	got := Render(m)
 
 	for _, want := range []string{
-		// The label is backslash-escaped plain text, so nothing in it opens a
-		// tag or closes the label early.
-		`- **` + "`payments`" + `** — [./p.modelith.yaml\) \<img src=x onerror=alert\(1\)\> \[click me\]\(\#](./p.modelith.yaml%29%20%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E%20%5Bclick%20me%5D%28%23.md)` + "\n",
+		// The path is a code span, so nothing in it opens a tag, and the link
+		// beside it carries a fixed label with nothing to escape.
+		"- **`payments`** — `./p.modelith.yaml) <img src=x onerror=alert(1)> [click me](#`" +
+			` ([rendered](./p.modelith.yaml%29%20%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E%20%5Bclick%20me%5D%28%23.md))` + "\n",
 		// A pipe survives in the destination as %7C rather than being escaped
 		// for a table cell it is not in.
-		"[./a\\|b.modelith.yaml](./a%7Cb.modelith.md)\n",
-		"[./a b.modelith.yaml](./a%20b.modelith.md)\n",
+		"`./a|b.modelith.yaml` ([rendered](./a%7Cb.modelith.md))\n",
+		"`./a b.modelith.yaml` ([rendered](./a%20b.modelith.md))\n",
 		// Every control character is replaced before the value is written.
-		"- **`line break`** — [./a \\#\\# Injected  b.modelith.yaml](./a%0A%23%23%20Injected%0A%0Ab.modelith.md)\n",
-		"[./a\\`b\\`\\`c.modelith.yaml](./a%60b%60%60c.modelith.md)\n",
+		"- **`line break`** — `./a ## Injected  b.modelith.yaml` ([rendered](./a%0A%23%23%20Injected%0A%0Ab.modelith.md))\n",
+		// A path holding backticks widens the span's fence rather than closing
+		// it early.
+		"```./a`b``c.modelith.yaml``` ([rendered](./a%60b%60%60c.modelith.md))\n",
 		// The deep link is assembled from escaped parts: escaping the finished
 		// link instead would put a backslash inside the destination.
 		"| `paidWith` | [payments.PaymentMethod](./p.modelith.yaml%29%20%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E%20%5Bclick%20me%5D%28%23.md#paymentmethod) |  |\n",
@@ -250,10 +256,19 @@ func TestRenderImports_HostilePathCannotEscapeItsMarkup(t *testing.T) {
 		}
 	}
 
-	// Every occurrence of a breakout token is a backslash-escaped one.
-	for _, tok := range []string{"<img", "[click me]"} {
-		if strings.Count(got, tok) != strings.Count(got, `\`+tok) {
-			t.Errorf("an unescaped %q survived in the imports section:\n%s", tok, got)
+	// Every breakout token that survives is inside a code span, where it is
+	// text. A bullet's only variable parts are the two spans and the
+	// percent-encoded destination, so removing the spans must leave the fixed
+	// skeleton and nothing else.
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.HasPrefix(line, "- **") {
+			continue
+		}
+		bare := stripCodeSpans(line)
+		for _, tok := range []string{"<img", "[click me]", "|", "#", "`"} {
+			if strings.Contains(bare, tok) {
+				t.Errorf("%q escaped its code span in %q (bullet %q)", tok, bare, line)
+			}
 		}
 	}
 	for _, line := range strings.Split(got, "\n") {
@@ -265,6 +280,43 @@ func TestRenderImports_HostilePathCannotEscapeItsMarkup(t *testing.T) {
 	if n := strings.Count(got, "\n- **"); n != len(m.Imports) {
 		t.Errorf("expected %d import bullets, got %d:\n%s", len(m.Imports), n, got)
 	}
+}
+
+// stripCodeSpans removes every backtick-fenced span from a line, matching the
+// fences by length the way CommonMark does — a run of n backticks is closed by
+// the next run of exactly n. RE2 has no backreference, so this is a scan rather
+// than a pattern.
+func stripCodeSpans(line string) string {
+	var b strings.Builder
+	for i := 0; i < len(line); {
+		if line[i] != '`' {
+			b.WriteByte(line[i])
+			i++
+			continue
+		}
+		open := i
+		for i < len(line) && line[i] == '`' {
+			i++
+		}
+		fence := line[open:i]
+		rest := line[i:]
+		close := strings.Index(rest, fence)
+		for close >= 0 && close+len(fence) < len(rest) && rest[close+len(fence)] == '`' {
+			// A longer run is not this fence's closer; keep looking.
+			next := strings.Index(rest[close+1:], fence)
+			if next < 0 {
+				close = -1
+				break
+			}
+			close += 1 + next
+		}
+		if close < 0 {
+			b.WriteString(fence) // unclosed: the fence is literal text
+			continue
+		}
+		i += close + len(fence)
+	}
+	return b.String()
 }
 
 // TestCodeSpan_FencesAroundBackticks checks the CommonMark rule the imports

@@ -75,6 +75,11 @@ func renderInvariants(b *strings.Builder, m *model.Model) {
 // linking each to its rendered Markdown. It never opens them: the imported
 // definitions are not restated here, only pointed at, so this document stays a
 // pure function of its own source (ADR-0010).
+//
+// The source path is shown as text and the link is labelled for what it leads
+// to, because they are two different files. Labelling the link with the ".yaml"
+// path while pointing it at the ".md" told the reader they were clicking
+// through to the model source.
 func renderImports(b *strings.Builder, m *model.Model) {
 	if len(m.Imports) == 0 {
 		return
@@ -83,9 +88,11 @@ func renderImports(b *strings.Builder, m *model.Model) {
 	b.WriteString("Items defined in these models are referenced below as `scope.Name`.\n\n")
 	// A path — and the scope a bare import derives from it — is author-supplied
 	// text that reaches a published page, so both go through the same escaping
-	// as every other string here, and the link destination through its own.
+	// as every other string here, and the link destination through its own. The
+	// link's own label is a fixed word, so it carries nothing to escape.
 	for _, imp := range m.Imports {
-		fmt.Fprintf(b, "- **%s** — [%s](%s)\n", codeSpan(imp.Scope), mdLinkText(imp.Path), linkTarget(model.RenderedPath(imp.Path)))
+		fmt.Fprintf(b, "- **%s** — %s ([rendered](%s))\n",
+			codeSpan(imp.Scope), codeSpan(imp.Path), linkTarget(model.RenderedPath(imp.Path)))
 	}
 	b.WriteString("\n")
 }
@@ -419,24 +426,6 @@ func codeSpan(s string) string {
 		s = " " + s + " "
 	}
 	return fence + s + fence
-}
-
-// mdLinkText escapes a value for use as a Markdown link label. A code span
-// would be the natural way to show a path, but a code span cannot escape the
-// "]" that ends the label: its inertness would rest on the rule that code spans
-// bind more tightly than link brackets, which the CommonMark spec states and
-// widely used renderers get wrong. A backslash escape holds everywhere, so the
-// label is plain text with every character that carries inline meaning escaped.
-// An ordinary relative path holds none of them and passes through unchanged.
-func mdLinkText(s string) string {
-	var b strings.Builder
-	for _, r := range oneLine(s) {
-		if strings.ContainsRune("\\`*_[]()<>&|~!#", r) {
-			b.WriteByte('\\')
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
 }
 
 // linkTarget percent-encodes a path for use as a Markdown link destination.

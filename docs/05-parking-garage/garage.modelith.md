@@ -8,7 +8,7 @@ Tracks the state of a single parking garage: its spots, the cars that occupy the
 
 Items defined in these models are referenced below as `scope.Name`.
 
-- **`payments`** — [./payments.modelith.yaml](./payments.modelith.md)
+- **`payments`** — `./payments.modelith.yaml` ([rendered](./payments.modelith.md))
 
 ## Glossary
 
