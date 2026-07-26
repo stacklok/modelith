@@ -23,6 +23,12 @@ type Model struct {
 	Version     string `json:"version"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Shared marks a model other models import. The references that justify its
+	// vocabulary then live in files it cannot see, so the completeness checks
+	// that flag a definition nothing here uses do not apply to it. It is the
+	// counterpart of Imports: one model declares what it reaches for, the other
+	// declares that it is reached for.
+	Shared bool `json:"shared,omitempty"`
 	// Imports are the other model files this one references, each bound to the
 	// scope written at its reference sites. Resolution does not recurse: an
 	// imported model's own imports are not reachable from here (ADR-0010,

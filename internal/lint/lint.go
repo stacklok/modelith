@@ -811,6 +811,17 @@ func runCompleteness(m *model.Model, res *Result) {
 	}
 
 	// Defined-but-unused glossary terms and enums — vocabulary nothing references.
+	//
+	// A shared model is imported by others, and an incoming reference is
+	// invisible from here: the vocabulary such a model exists to publish would
+	// otherwise read as vocabulary nothing uses, and a pure vocabulary model
+	// could never pass --completeness error. Only these two checks are relaxed;
+	// a missing invariant or an unexercised entity is a gap in the model itself,
+	// which being imported does not fill.
+	if m.Shared {
+		return
+	}
+
 	usedTerm := map[string]bool{}
 	scan := func(text string) {
 		for _, b := range entityRefs(text) {

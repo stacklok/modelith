@@ -1088,6 +1088,100 @@ entities:
 	}
 }
 
+// TestCompleteness_SharedRelaxesOnlyTheUnusedChecks pins the escape hatch a
+// vocabulary model needs. A model that exists to be imported has its enums and
+// glossary terms referenced from files it cannot see, so under
+// --completeness error it could not pass at all; `shared: true` says the
+// references are elsewhere. It says nothing about content, so a gap that being
+// imported does not fill — an entity with no invariants, an entity no scenario
+// exercises — is still reported.
+func TestCompleteness_SharedRelaxesOnlyTheUnusedChecks(t *testing.T) {
+	t.Parallel()
+
+	// A vocabulary model with nothing missing from it: every entity has an
+	// invariant and a scenario that exercises it. All that is left is the enum
+	// and the glossary term it exists to publish, which nothing here uses.
+	const vocabulary = `
+kind: DomainModel
+version: v1
+glossary:
+  Payer: Whoever hands over the money; named only by the models that import this one.
+enums:
+  PaymentMethod:
+    values:
+      - name: card
+scenarios:
+  - name: A charge is settled
+    actors: [Payment]
+    steps:
+      - A card is tapped and the transfer is recorded.
+    invariants_touched: [payment-amount-positive]
+entities:
+  Payment:
+    definition: One completed transfer of money.
+    invariants:
+      - id: payment-amount-positive
+        statement: A payment's amount is greater than zero.
+`
+	// A gap a shared model does not get to skip: an entity nothing governs and
+	// no scenario exercises is missing from the model itself, which being
+	// imported does not fill.
+	const contentGap = "  Refund:\n    definition: Money returned.\n"
+
+	cases := []struct {
+		name string
+		src  string
+		// unused is whether the defined-but-locally-unused findings are expected.
+		unused bool
+		// blocking is HasBlocking under --completeness error.
+		blocking bool
+		gap      bool
+	}{
+		{name: "not shared", src: vocabulary, unused: true, blocking: true},
+		{
+			name: "shared",
+			src:  strings.Replace(vocabulary, "version: v1", "version: v1\nshared: true", 1),
+		},
+		{
+			name:     "shared, with a gap that is not about being used",
+			src:      strings.Replace(vocabulary, "version: v1", "version: v1\nshared: true", 1) + contentGap,
+			blocking: true,
+			gap:      true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res, err := Run(testModelPath, []byte(tc.src), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, msg := range []string{
+				`glossary term "Payer" is defined but never referenced`,
+				`enum "PaymentMethod" is defined but no attribute uses it`,
+			} {
+				if got := findingWithMessage(res.Findings, msg); got != tc.unused {
+					t.Errorf("finding %q present = %v, want %v: %+v", msg, got, tc.unused, res.Findings)
+				}
+			}
+			for _, msg := range []string{
+				`entity "Refund" has no invariants`,
+				`no scenario exercises entity "Refund"`,
+			} {
+				if got := findingWithMessage(res.Findings, msg); got != tc.gap {
+					t.Errorf("finding %q present = %v, want %v: %+v", msg, got, tc.gap, res.Findings)
+				}
+			}
+			// The boundary this exists for: only the shared model with nothing
+			// else missing passes --completeness error.
+			if got := res.HasBlocking(true); got != tc.blocking {
+				t.Errorf("HasBlocking(true) = %v, want %v: %+v", got, tc.blocking, res.Findings)
+			}
+		})
+	}
+}
+
 func TestDerivedRequiresDerivation(t *testing.T) {
 	src := `
 kind: DomainModel

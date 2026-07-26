@@ -2,6 +2,7 @@
 kind: DomainModel
 version: v1
 title: Payments
+shared: true
 description: >-
   How money is taken and given back. A deliberately small context that owns the
   vocabulary of settling a charge — nothing in it knows what was bought, which

@@ -25,6 +25,10 @@
       "description": "Optional one-paragraph summary of what this model covers.",
       "type": "string"
     },
+    "shared": {
+      "description": "True if other models import this one. Its enums and glossary terms are then expected to be referenced from outside, which no single file can show, so the completeness checks that flag a definition nothing in THIS file uses do not apply to it. Checks about missing content — an entity with no invariants, an entity no scenario exercises — still do.",
+      "type": "boolean"
+    },
     "imports": {
       "description": "Other model files whose items this model references. Each entry is a path relative to this file — \"..\" is fine; an absolute path is not portable across checkouts and is rejected — and binds a scope this model writes before an imported item's name (\"payments.PaymentMethod\"). Resolution does not recurse: only items defined directly in a listed file are reachable.",
       "type": "array",

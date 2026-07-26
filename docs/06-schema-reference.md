@@ -31,6 +31,7 @@ the schema). Print the schema any time with `modelith schema`.
 | `version` | string | yes | Schema revision. Currently `v1`. |
 | `title` | string | no | Heading used when rendering. |
 | `description` | string | no | One-paragraph summary. |
+| `shared` | boolean | no | `true` if other models import this one. Relaxes the completeness checks that flag a definition nothing in *this* file uses. See [Imports](#imports). |
 | `imports` | list | no | Other model files whose items this one references, each a path relative to this file. See [Imports](#imports). |
 | `glossary` | map | no | Ubiquitous-language terms that aren't entities. See [Glossary](#glossary). |
 | `enums` | map | no | First-class enumerated types. See [Enum](#enum). |
@@ -363,6 +364,36 @@ The full rationale, including where this is heading, is
 and the boundary itself is
 [ADR-0013](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0013-imports-confined-to-the-repository.md).
 
+### The model on the other end: `shared: true`
+
+A model that exists to be imported has a problem the completeness checks would
+otherwise punish it for: the references that justify its enums and glossary
+terms are in files it cannot see. A pure vocabulary model — one that owns a
+`PaymentMethod` and nothing else — collects a "defined but no attribute uses it"
+warning for every enum in it, and under
+[`--completeness error`](./07-cli.md) that is a failed build.
+
+Say so at the top level:
+
+```yaml
+# payments.modelith.yaml
+kind: DomainModel
+version: v1
+shared: true
+enums:
+  PaymentMethod:
+    values:
+      - name: card
+```
+
+`shared: true` is the counterpart of `imports`: one model declares what it
+reaches for, the other declares that it is reached for. It relaxes exactly the
+checks about a definition nothing *here* uses — the unused enum and the unused
+glossary term. It relaxes nothing about content: an entity with no invariants,
+and an entity no scenario exercises, are gaps in the model itself, and being
+imported does not fill them. Nothing verifies the claim, and nothing needs to:
+overstating it costs two advisory warnings, not correctness.
+
 ## What this format deliberately leaves out
 
 modelith is a light, agent-authored subset of domain-driven design, not a full
@@ -431,7 +462,9 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
     - an action `actor` that is neither a defined entity nor a glossary term.
 - **Completeness** checks (advisory warnings): entities with no invariants;
   entities no scenario exercises; a glossary term nothing references; an enum no
-  attribute uses; an [import](#imports) nothing references.
+  attribute uses; an [import](#imports) nothing references. The two
+  nothing-references-it checks don't apply to a model marked
+  [`shared: true`](#the-model-on-the-other-end-shared-true).
 
   These are advisory on purpose. An entity that genuinely has no rule to state
   is fine — leave its invariants empty rather than inventing a filler rule that
