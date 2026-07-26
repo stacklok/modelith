@@ -66,6 +66,10 @@ extract_and_check_md() {
     fi
     printf '%s\n' "$line" >>"$out"
   done <"$md"
+  if [ "$in_block" -ne 0 ]; then
+    echo "::error::mermaid-check: unterminated \`\`\`mermaid fence in $rel (block #$block never closed before EOF)"
+    fail=1
+  fi
 }
 
 md_files=(examples/*.md docs/05-parking-garage/*.md)
@@ -83,6 +87,11 @@ done
 for f in "${mmd_files[@]}"; do
   check_file "$f" "$f"
 done
+
+if [ "$count" -eq 0 ]; then
+  echo "::error::mermaid-check: found source files but extracted zero Mermaid blocks to check (fence format drift?)"
+  exit 1
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo "mermaid-check: FAILED ($count block(s) checked)"

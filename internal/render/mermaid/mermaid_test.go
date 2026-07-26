@@ -602,16 +602,23 @@ func TestERDedupesSemanticallyEqualInverses(t *testing.T) {
 
 // TestERRole_HostileCharacters pins current output for a role that packs
 // every hostile character sanitize knows about (backticks, quotes, brackets, a
-// literal newline) alongside three it does NOT neutralize: '<', '>', and '%%'.
-// Those three pass through unescaped into the generated diagram source — a
-// known bug tracked as issue #29 (a role can inject a Mermaid directive via
-// "%%{...}%%", or lose text that looks like "<...>" markup). This golden pins
-// the CURRENT (buggy) behavior on purpose, not the desired one: fixing #29
-// must update this golden as part of that fix, not treat the diff as a
-// regression.
+// literal newline) alongside characters it does NOT neutralize: '<', '>', and
+// '%%'. This golden pins the CURRENT (buggy) behavior on purpose, not the
+// desired one: fixing issue #29 must update this golden as part of that fix,
+// not treat the diff as a regression. This test pins only the generated `.mmd`
+// source text produced by ER() — it does not verify how a Mermaid renderer
+// interprets that text.
+//
+// The role also embeds a `%%{init: ...}%%`-shaped substring. Separately, a
+// real render of that shape through mmdc was confirmed to parse successfully
+// while silently changing the whole diagram's theme and dropping this edge's
+// label text — a more severe manifestation of #29 than plain character
+// passthrough into the label. This golden pins that the substring reaches the
+// generated source unescaped; it does not itself exercise or assert the
+// renderer-level effect, which was only checked by hand outside this test.
 func TestERRole_HostileCharacters(t *testing.T) {
 	t.Parallel()
-	role := "he said \"hi\" [bracket] `tick` {brace} <angle> #hash %%pct\nsecond line"
+	role := "he said \"hi\" [bracket] `tick` {brace} <angle> #hash %%pct %%{init: {'theme':'forest'}}%%\nsecond line"
 	m := &model.Model{Entities: map[string]model.Entity{
 		"A": {Definition: "a", Relationships: []model.Relationship{
 			{Entity: "B", Cardinality: "1:n", Role: role, Ownership: "owned"},
