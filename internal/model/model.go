@@ -18,14 +18,22 @@ import (
 
 // Model is the top-level domain model document.
 type Model struct {
-	Kind        string            `json:"kind"`
-	Version     string            `json:"version"`
-	Title       string            `json:"title,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Glossary    map[string]string `json:"glossary,omitempty"`
-	Enums       map[string]Enum   `json:"enums,omitempty"`
-	Entities    map[string]Entity `json:"entities,omitempty"`
-	Scenarios   []Scenario        `json:"scenarios,omitempty"`
+	Kind        string `json:"kind"`
+	Version     string `json:"version"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Scope is the slug another model writes before an item's name
+	// ("payments.PaymentMethod") when it imports this one. It is declared here
+	// and nowhere restated, so nothing can disagree about the slug.
+	Scope string `json:"scope,omitempty"`
+	// Imports are paths to other model files, relative to this one, whose items
+	// this model may reference. Resolution does not recurse: an imported model's
+	// own imports are not reachable from here (ADR-0010).
+	Imports   []string          `json:"imports,omitempty"`
+	Glossary  map[string]string `json:"glossary,omitempty"`
+	Enums     map[string]Enum   `json:"enums,omitempty"`
+	Entities  map[string]Entity `json:"entities,omitempty"`
+	Scenarios []Scenario        `json:"scenarios,omitempty"`
 	// Invariants are model-level rules that span several entities and have no
 	// single owner. They share the per-entity invariant shape, and their ids
 	// share one namespace with entity invariants (unique across the model).
