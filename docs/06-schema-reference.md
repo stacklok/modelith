@@ -305,7 +305,7 @@ exactly `{scope: x, path: ./x.modelith.yaml}`. If the filename doesn't yield a
 valid slug (`./Pay Ments.yaml`), the linter says so and points at the explicit
 form.
 
-Five rules are worth knowing before you use this:
+Six rules are worth knowing before you use this:
 
 - **A dot means a cross-model reference.** An attribute `type` containing one
   has to be exactly `scope.Name` — one dot, a slug before it, a PascalCase item
@@ -329,6 +329,14 @@ Five rules are worth knowing before you use this:
 - **Nothing is fetched.** `imports` names files that are already in your
   repository; `lint` and `render` never touch the network
   ([ADR-0011](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0011-network-boundary.md)).
+- **An import cannot leave the repository.** `..` is fine, but only as far as
+  the repository holding the model — the nearest directory above it with a
+  `.git` entry. Past that it is an error naming where the path resolved to and
+  what the root is. Symlinks are followed first, so a link pointing out is
+  caught too. **With no repository anywhere above the model, the root is the
+  model's own directory** — outside a repository the tool cannot tell how far
+  your project extends, so it assumes the least, and even a sibling directory
+  is out of reach.
 
 Rendered Markdown names each import and links it to that model's rendered `.md`,
 and a qualified type links straight to the item's heading there. The renderer
@@ -342,8 +350,17 @@ invented, so the linter can only suggest; `payments.PaymentMethod` can be
 nothing but a cross-model reference, so failing to resolve it is a broken
 reference.
 
+The repository boundary keeps a model from an untrusted source probing the
+filesystem of whatever machine lints it — the four answers an import can produce
+(resolves, missing, unreadable, not a model) are otherwise a usable oracle. It
+does not stop the same probing *within* the repository, and that is accepted:
+anyone who can already commit a file to your repository has better options than
+a lint diagnostic.
+
 The full rationale, including where this is heading, is
-[ADR-0010](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0010-cross-model-references-by-vendoring.md).
+[ADR-0010](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0010-cross-model-references-by-vendoring.md),
+and the boundary itself is
+[ADR-0013](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0013-imports-confined-to-the-repository.md).
 
 ## What this format deliberately leaves out
 

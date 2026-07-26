@@ -82,7 +82,11 @@ func runImports(modelPath string, m *model.Model, fr FileReader, res *Result) {
 func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) (byScope map[string]importedModel, claimed map[string]string) {
 	byScope = map[string]importedModel{}
 	claimed = map[string]string{}
+	if len(m.Imports) == 0 {
+		return byScope, claimed
+	}
 	dir := filepath.Dir(modelPath)
+	root, inRepo := resolutionRoot(modelPath)
 	for i, imp := range m.Imports {
 		reject := func(format string, args ...any) {
 			res.Findings = append(res.Findings, Finding{
@@ -131,7 +135,23 @@ func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) (
 			reject("import %q is an absolute path — imports are relative to this model so they resolve in any checkout", imp.Path)
 			continue
 		}
-		data, err := fr.ReadFile(filepath.Join(dir, imp.Path))
+		// Containment is decided before the file is opened, because opening it
+		// is the leak: whether a path resolves, is missing, is unreadable, or
+		// holds no model are four distinct diagnostics, and together they let a
+		// model from an untrusted source probe the filesystem of whatever runner
+		// lints it (ADR-0013).
+		joined := filepath.Join(dir, imp.Path)
+		if resolved := realPath(absolute(joined)); !withinRoot(root, resolved) {
+			if inRepo {
+				reject("import %q resolves to %q, outside %q — that directory is the repository holding this model (the nearest ancestor with a .git entry), and an import may not name a file beyond it",
+					imp.Path, resolved, root)
+			} else {
+				reject("import %q resolves to %q, outside %q — this model is in no repository, so resolution is confined to the directory holding it; move the imported model into that directory or below it",
+					imp.Path, resolved, root)
+			}
+			continue
+		}
+		data, err := fr.ReadFile(joined)
 		if err != nil {
 			reject("import %q cannot be read: %v", imp.Path, err)
 			continue
