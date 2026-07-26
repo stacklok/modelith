@@ -21,6 +21,16 @@ cd "$root"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 
+# GitHub-hosted ubuntu-latest runners disable unprivileged user namespaces
+# (AppArmor), which Chrome's sandbox needs; mmdc's bundled Chromium fails to
+# launch there with "No usable sandbox!". --no-sandbox is the documented
+# workaround (mermaid-cli/puppeteer troubleshooting docs). Safe here only
+# because every source this script feeds mmdc is repo-authored (committed
+# docs/examples or our own renderer's golden fixtures) — never
+# untrusted/fetched content, which is the usual caveat against --no-sandbox.
+puppeteer_config="$workdir/puppeteer-config.json"
+printf '{"args": ["--no-sandbox"]}' >"$puppeteer_config"
+
 fail=0
 count=0
 
@@ -31,7 +41,7 @@ check_file() {
   count=$((count + 1))
   local out="$workdir/check-$count.svg"
   local log="$workdir/check-$count.log"
-  if ! npx -y @mermaid-js/mermaid-cli@11 -i "$mmd" -o "$out" >"$log" 2>&1; then
+  if ! npx -y @mermaid-js/mermaid-cli@11 -p "$puppeteer_config" -i "$mmd" -o "$out" >"$log" 2>&1; then
     echo "::error::mermaid-check: parse failed for $label"
     cat "$log"
     fail=1
