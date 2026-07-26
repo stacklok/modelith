@@ -45,9 +45,12 @@ listed file declares its own `scope:`, which is the single source of truth for
 the slug — nothing is repeated, so nothing can disagree. There is no directory
 convention and no scanning. Resolution does not recurse: an imported model's
 own `imports:` are ignored, so only items defined directly in a listed file are
-reachable. Two listed files declaring the same `scope:` is an error, as is
-listing a file that declares none — with no alias layer there is no local
-remedy for a collision, so it has to be named rather than silently resolved.
+reachable. Two listed files declaring the same `scope:` is a lint error, as is
+listing a file that declares none. Between two local models a collision is
+fixed by renaming a `scope:`; between vendored copies of two upstreams that
+chose the same slug there is no local remedy, because there is no alias layer
+to bind one of them to a different name. Either way it is named rather than
+silently resolved to whichever file was listed first.
 
 **Local and vendored imports.** An import is either *local* — a model that
 lives in this repo and is canonical here — or *vendored* — a copy of a model
@@ -106,6 +109,14 @@ file with `--completeness` and optionally renders each one
 (`action.yml:90-99`), so without this rule a vendored model turns a user's CI
 red for gaps in someone else's document. Excluding a vendored directory from
 the glob is the user's other lever, but it must not be the only one.
+
+`render --check` is the same problem wearing different clothes: it fails when a
+model's `.md` is absent or stale, and a vendored model arrives with neither
+obligation — its rendered form belongs to its home repo. Vendored files are
+therefore skipped by `render --check` rather than being required to carry a
+committed `.md` that this repo would then have to regenerate whenever upstream
+moved. Rendering one explicitly, by naming it, still works; that is how a deep
+link into a vendored model's `.md` gets something to point at.
 
 **A vendored file linted on its own.** Globs and editors will lint vendored
 files directly, and such a file's own `imports:` point at paths in its home
