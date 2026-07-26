@@ -706,13 +706,13 @@ func TestADR_0008_MutualOwnershipIsError(t *testing.T) {
 			name: "mutual owned under differing roles is still a contradiction",
 			aOwn: "owned", bOwn: "owned",
 			aRole: "part", bRole: "whole",
-			want:  "mutual ownership",
+			want: "mutual ownership",
 		},
 		{
 			name: "one end owning, the other referencing",
 			aOwn: "owned", bOwn: "referenced",
 			aRole: "part", bRole: "whole",
-			want:  "",
+			want: "",
 		},
 		{
 			name: "an omitted ownership on the other end is the same as referenced",
@@ -723,7 +723,7 @@ func TestADR_0008_MutualOwnershipIsError(t *testing.T) {
 			name: "neither end claims ownership",
 			aOwn: "", bOwn: "",
 			aRole: "part", bRole: "whole",
-			want:  "",
+			want: "",
 		},
 	}
 	for _, tc := range cases {
@@ -828,6 +828,182 @@ scenarios:
 	}
 	if len(res.Findings) != 0 {
 		t.Fatalf("expected no findings on a reciprocal composition, got %d: %+v", len(res.Findings), res.Findings)
+	}
+}
+
+// TestADR_0008_AmbiguousPairingIsWarning pins the diagnostic for a pair whose
+// reciprocal declarations cannot be matched up: one end declares the same line
+// twice and the other declares it once, so which is the reciprocal of which is
+// undeterminable. The renderer refuses to guess and draws all of them, which is
+// lossless but shows more lines than the author probably means.
+//
+// A warning, never an error: the model may be exactly right. It must stay
+// silent whenever each direction declares the line at most once, which is every
+// shipped example and every other fixture.
+func TestADR_0008_AmbiguousPairingIsWarning(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		rels string
+		want bool
+		path string
+	}{
+		{
+			name: "two forward, one back",
+			rels: `
+  Project:
+    definition: A container.
+    relationships:
+      - entity: Policy
+        cardinality: "1:n"
+        role: defaults
+      - entity: Policy
+        cardinality: "1:n"
+        role: overrides
+  Policy:
+    definition: A rule.
+    relationships:
+      - entity: Project
+        cardinality: "n:1"
+        role: parent
+        ownership: owned
+`,
+			want: true,
+			path: "/entities/Project/relationships/0",
+		},
+		{
+			name: "one forward, two back",
+			rels: `
+  Project:
+    definition: A container.
+    relationships:
+      - entity: Policy
+        cardinality: "1:n"
+        role: parent
+        ownership: owned
+  Policy:
+    definition: A rule.
+    relationships:
+      - entity: Project
+        cardinality: "n:1"
+        role: defaults
+      - entity: Project
+        cardinality: "n:1"
+        role: overrides
+`,
+			want: true,
+			path: "/entities/Policy/relationships/0",
+		},
+		{
+			name: "two forward, none back: nothing to pair, so nothing ambiguous",
+			rels: `
+  Project:
+    definition: A container.
+    relationships:
+      - entity: Policy
+        cardinality: "1:n"
+        role: defaults
+      - entity: Policy
+        cardinality: "1:n"
+        role: overrides
+  Policy:
+    definition: A rule.
+`,
+			want: false,
+		},
+		{
+			name: "one each way: the ordinary reciprocal",
+			rels: `
+  Project:
+    definition: A container.
+    relationships:
+      - entity: Policy
+        cardinality: "1:n"
+        role: parent
+        ownership: owned
+  Policy:
+    definition: A rule.
+    relationships:
+      - entity: Project
+        cardinality: "n:1"
+        role: child
+`,
+			want: false,
+		},
+		{
+			name: "two forward at different cardinalities, one back: distinct lines",
+			rels: `
+  Project:
+    definition: A container.
+    relationships:
+      - entity: Policy
+        cardinality: "1:n"
+        role: defaults
+      - entity: Policy
+        cardinality: "1:1"
+        role: primary
+  Policy:
+    definition: A rule.
+    relationships:
+      - entity: Project
+        cardinality: "n:1"
+        role: parent
+        ownership: owned
+`,
+			want: false,
+		},
+		{
+			name: "the second forward declaration is an exact duplicate of the first",
+			rels: `
+  Project:
+    definition: A container.
+    relationships:
+      - entity: Policy
+        cardinality: "1:n"
+        role: defaults
+      - entity: Policy
+        cardinality: "1:n"
+        role: defaults
+  Policy:
+    definition: A rule.
+    relationships:
+      - entity: Project
+        cardinality: "n:1"
+        role: parent
+        ownership: owned
+`,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res, err := Run([]byte("kind: DomainModel\nversion: v1\nentities:" + tc.rels))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := findingWithMessage(res.Findings, "ambiguous reciprocal pairing")
+			if got != tc.want {
+				t.Fatalf("ambiguous-pairing warning = %v, want %v; findings: %+v", got, tc.want, res.Findings)
+			}
+			if !got {
+				return
+			}
+			for _, f := range res.Findings {
+				if !strings.Contains(f.Message, "ambiguous reciprocal pairing") {
+					continue
+				}
+				if f.Severity != SeverityWarning || f.Category != CategorySemantic {
+					t.Errorf("expected a semantic warning, got %s/%s", f.Severity, f.Category)
+				}
+				if f.Path != tc.path {
+					t.Errorf("path = %q, want %q", f.Path, tc.path)
+				}
+			}
+			if res.HasBlocking(false) {
+				t.Error("an ambiguous pairing is advisory, not blocking")
+			}
+		})
 	}
 }
 
@@ -1257,7 +1433,7 @@ entities:
     definition: A way to pay.
     invariants:
       - id: pm-usable
-        statement: A `+"`PaymentMethod`"+` is either active or revoked.
+        statement: A ` + "`PaymentMethod`" + ` is either active or revoked.
   Card:
     definition: A payment method backed by a card; adds no rule of its own.
     subtypeOf: PaymentMethod

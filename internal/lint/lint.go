@@ -107,6 +107,7 @@ func Run(data []byte) (*Result, error) {
 	runRelationshipShape(m, res)
 	runSubtypes(m, res)
 	runReciprocity(m, res)
+	runPairing(m, res)
 	runCompleteness(m, res)
 
 	sortFindings(res)
@@ -691,10 +692,40 @@ func runReciprocity(m *model.Model, res *Result) {
 	}
 }
 
-// normalizeRole reduces a role to the text the diagram labels a line with:
-// backticks are markup, and surrounding space is not content.
-func normalizeRole(role string) string {
-	return strings.TrimSpace(strings.ReplaceAll(role, "`", ""))
+// runPairing warns where a relationship declared from both ends cannot be
+// paired up: one end declares the same line more than once, so which
+// declaration is the reciprocal of which is undeterminable — the format has no
+// way to say. The renderer refuses to guess and draws every declaration as its
+// own line (ADR-0008), which is lossless but shows more lines than the author
+// probably means, so it is worth naming.
+//
+// A warning, never an error: the model may be exactly right, and there is no
+// wording of it the linter could demand instead. Declaring each relationship
+// from one end only resolves it.
+func runPairing(m *model.Model, res *Result) {
+	for _, g := range model.EdgeGroups(m) {
+		if !g.AmbiguousPairing() {
+			continue
+		}
+		// Point at the first declaration on the crowded end — the one an author
+		// would edit — preferring the alphabetically earlier entity when both
+		// ends are crowded, so the finding is stable.
+		at := g.First
+		if len(at) < 2 && len(g.Second) > 1 {
+			at = g.Second
+		}
+		d := at[0]
+		res.Findings = append(res.Findings, Finding{
+			Severity: SeverityWarning,
+			Category: CategorySemantic,
+			Path:     fmt.Sprintf("/entities/%s/relationships/%d", d.From, d.Index),
+			Message: fmt.Sprintf(
+				"ambiguous reciprocal pairing between %q and %q at cardinality %q: %s declares it %d time(s) and %s %d time(s), so which declaration is the reciprocal of which cannot be determined — the diagram draws every declaration as its own line; declare each relationship from one end only to pair them up",
+				g.FirstN, g.SecondN, g.First[0].Rel.Cardinality,
+				g.FirstN, len(g.First), g.SecondN, len(g.Second),
+			),
+		})
+	}
 }
 
 func runCompleteness(m *model.Model, res *Result) {
@@ -861,7 +892,7 @@ const roleLabelMax = 40
 // ("`Project`.owner") or a version ("v1.0 owner") as the end of a sentence.
 // "`Owner` or `Member`" passes; "the record this one supersedes" does not.
 func readsAsProse(role string) bool {
-	role = normalizeRole(role)
+	role = model.NormalizeRole(role)
 	if role == "" {
 		return false
 	}

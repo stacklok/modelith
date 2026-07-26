@@ -1,6 +1,8 @@
 package mermaid
 
 import (
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -284,29 +286,112 @@ func TestADR_0008_ReciprocalCompositionFoldsToOneEdge(t *testing.T) {
 	}
 }
 
-// TestERFoldsOneReciprocalPerEdge guards the fold against absorbing more than
-// one declaration from the opposite end. Three declarations on one pair are not
-// one relationship, and the linter deliberately leaves such a pair alone, so the
-// renderer must not merge them all into a single line.
-func TestERFoldsOneReciprocalPerEdge(t *testing.T) {
+// edgeLines returns the rendered relationship lines, sorted. Sorting drops the
+// one thing about the output that legitimately follows the source: the order
+// the author wrote the declarations in. What must not vary is the set of lines.
+func edgeLines(out string) []string {
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, " : ") {
+			lines = append(lines, l)
+		}
+	}
+	sort.Strings(lines)
+	return lines
+}
+
+// TestADR_0008_AmbiguousPairingKeepsEveryDeclaration is the regression guard for
+// the defect ADR-0008's earlier "no declaration disappears" wording promised but
+// did not deliver. When one end declares the same line twice and the other
+// declares it once, no pairing exists in the format: the single declaration is
+// the reciprocal of one of the two, and nothing says which. Folding it into
+// either drops the other's role, and which one depends on declaration order.
+// So nothing folds — every declaration draws.
+func TestADR_0008_AmbiguousPairingKeepsEveryDeclaration(t *testing.T) {
 	t.Parallel()
 	m := &model.Model{Entities: map[string]model.Entity{
-		"Alpha": {Definition: "one", Relationships: []model.Relationship{
-			{Entity: "Beta", Cardinality: "n:n", Role: "Owner"},
+		"Project": {Definition: "a container", Relationships: []model.Relationship{
+			{Entity: "Policy", Cardinality: "1:n", Role: "defaults", Ownership: "referenced"},
+			{Entity: "Policy", Cardinality: "1:n", Role: "overrides", Ownership: "referenced"},
 		}},
-		"Beta": {Definition: "two", Relationships: []model.Relationship{
-			{Entity: "Alpha", Cardinality: "n:n", Role: "Member"},
-			{Entity: "Alpha", Cardinality: "n:n", Role: "Watcher"},
+		"Policy": {Definition: "a rule", Relationships: []model.Relationship{
+			{Entity: "Project", Cardinality: "n:1", Role: "parent", Ownership: "owned"},
 		}},
 	}}
 	out := ER(m)
-	if n := strings.Count(out, " : "); n != 2 {
-		t.Errorf("expected two edges, got %d:\n%s", n, out)
+	want := []string{
+		`    Policy }o--|| Project : "parent"`,
+		`    Project ||..o{ Policy : "defaults"`,
+		`    Project ||..o{ Policy : "overrides"`,
 	}
-	for _, want := range []string{"    Alpha }o..o{ Beta : \"Owner\"\n", "    Beta }o..o{ Alpha : \"Watcher\"\n"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("expected edge %q; got:\n%s", want, out)
-		}
+	if got := edgeLines(out); !slices.Equal(got, want) {
+		t.Errorf("expected every declaration drawn:\n%v\ngot:\n%v\nin:\n%s", want, got, out)
+	}
+}
+
+// TestERAmbiguousPairingIsOrderIndependent pins the property the round-3 defect
+// broke: reordering an entity's relationship list must not change which
+// declarations survive or how they draw. Only the order the lines are listed in
+// follows the source, so the comparison is on the sorted set.
+func TestERAmbiguousPairingIsOrderIndependent(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		alpha, bet []model.Relationship
+		swapAlpha  bool // swap alpha's two declarations rather than beta's
+	}{
+		{
+			name: "two on the first end, one owned, one back",
+			alpha: []model.Relationship{
+				{Entity: "Beta", Cardinality: "1:n", Role: "P", Ownership: "owned"},
+				{Entity: "Beta", Cardinality: "1:n", Role: "Q", Ownership: "referenced"},
+			},
+			bet:       []model.Relationship{{Entity: "Alpha", Cardinality: "n:1", Role: "R", Ownership: "referenced"}},
+			swapAlpha: true,
+		},
+		{
+			name: "two on the first end, the owning declaration coming back",
+			alpha: []model.Relationship{
+				{Entity: "Beta", Cardinality: "1:n", Role: "P", Ownership: "referenced"},
+				{Entity: "Beta", Cardinality: "1:n", Role: "Q", Ownership: "referenced"},
+			},
+			bet:       []model.Relationship{{Entity: "Alpha", Cardinality: "n:1", Role: "R", Ownership: "owned"}},
+			swapAlpha: true,
+		},
+		{
+			name:  "one on the first end, two coming back",
+			alpha: []model.Relationship{{Entity: "Beta", Cardinality: "1:n", Role: "P", Ownership: "owned"}},
+			bet: []model.Relationship{
+				{Entity: "Alpha", Cardinality: "n:1", Role: "R1", Ownership: "referenced"},
+				{Entity: "Alpha", Cardinality: "n:1", Role: "R2", Ownership: "referenced"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			build := func(swapped bool) string {
+				alpha, bet := slices.Clone(tc.alpha), slices.Clone(tc.bet)
+				if swapped {
+					if tc.swapAlpha {
+						alpha[0], alpha[1] = alpha[1], alpha[0]
+					} else {
+						bet[0], bet[1] = bet[1], bet[0]
+					}
+				}
+				return ER(&model.Model{Entities: map[string]model.Entity{
+					"Alpha": {Definition: "one", Relationships: alpha},
+					"Beta":  {Definition: "two", Relationships: bet},
+				}})
+			}
+			asDeclared, swapped := build(false), build(true)
+			if got, want := edgeLines(swapped), edgeLines(asDeclared); !slices.Equal(got, want) {
+				t.Errorf("swapping the declaration order changed the edges:\nas declared: %v\nswapped:     %v", want, got)
+			}
+			if n := len(edgeLines(asDeclared)); n != len(tc.alpha)+len(tc.bet) {
+				t.Errorf("expected every declaration drawn (%d), got %d:\n%s", len(tc.alpha)+len(tc.bet), n, asDeclared)
+			}
+		})
 	}
 }
 

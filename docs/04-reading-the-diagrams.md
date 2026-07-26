@@ -142,6 +142,10 @@ nothing you wrote vanishes from the picture:
   error.
 - If one entity declares two relationships to the same entity that differ in
   `ownership` or in role, those are two relationships, and both draw.
+- If one end declares the same relationship *twice* and the other declares it
+  back once, there's no way to tell which two of the three are the pair. Every
+  declaration draws its own line, and `modelith lint` warns that the pairing is
+  ambiguous. Declaring each relationship from one end only clears it up.
 
 ## The labels on the lines
 

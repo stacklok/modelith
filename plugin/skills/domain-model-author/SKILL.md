@@ -115,8 +115,10 @@ Follow the format exactly (see the schema reference). Key conventions:
   (`1:n` ⇄ `n:1`; `1:1`/`n:n` symmetric) — a contradiction is a lint **error**.
   So is a pair where both ends claim `ownership: owned` — a relationship is
   owned by at most one end. The two ends may name different roles; the diagram
-  folds them into one line either way. Declaring it from one side only is fine
-  and usually clearer.
+  folds them into one line either way. But if one entity declares *two*
+  relationships to another and that other declares one back, the pairing is
+  ambiguous (a lint warning) and the diagram draws all three lines. Declaring
+  each relationship from one side only is fine and usually clearer.
 - **`role` is a short role name** (`` `Owner` ``, `` `Predecessor` ``), not a
   sentence: it is the only label drawn on the diagram line, so prose there
   collides with neighbouring lines and warns. Put the explanation in `note`.

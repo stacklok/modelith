@@ -18,25 +18,38 @@ fakes structure the ER cannot honestly show.
 2. **Two declarations become one line only when they are one relationship.** The
    renderer merges a pair of declarations in exactly two cases: a genuine
    reciprocal — the same pair, inverse cardinality, declared from *opposite*
-   ends, with at most one end claiming `owned` — and an exact duplicate from the
-   same end. A genuine reciprocal draws solid if either end said `owned`,
-   because ownership belongs to the relationship rather than to the end that
-   named it.
+   ends, with at most one end claiming `owned`, **and each end declaring that
+   line only once** — and an exact duplicate from the same end. A genuine
+   reciprocal draws solid if either end said `owned`, because ownership belongs
+   to the relationship rather than to the end that named it.
 
    **Roles are not part of the predicate.** The two ends of a composition
    naturally name different roles — a parent's `part` is a child's `whole` —
    and that is the pattern the fold exists for, not a conflict. The single line
    is labelled by the owning end's role; with neither end owning, by the role
    from the end whose entity sorts first, so the choice never depends on
-   iteration order. The other role is dropped from the *diagram* only: the
-   Markdown lists each entity's own relationships, so both roles remain in the
-   document. That is ADR-0002's declaredly lossy view, not information loss.
+   declaration order.
 
-   Every other case draws both lines, so no declaration disappears: two
-   declarations from the same end that differ in `ownership` or in role are two
-   relationships, and mutual `owned` is a contradiction, not a fold. Mutual
-   `owned` is the one contradiction a reciprocal pair can hold, and it is a lint
-   **error**.
+   **The once-per-end condition is what makes the fold safe.** If one end
+   declares the same line twice and the other declares it once, that one
+   declaration is the reciprocal of one of the two — and the format cannot say
+   which. Folding it into either drops the other's role, and which one depends
+   on the order the declarations happen to be written in. So nothing folds for
+   that pair: every declaration draws its own line. A lint **warning** names the
+   pair, since more lines appear than the author probably means.
+
+   Mutual `owned` is the one contradiction a reciprocal pair can hold — a
+   relationship is owned by at most one end — and it is a lint **error**. The
+   two lines both draw.
+
+   **The guarantee, stated exactly.** Every declaration draws a line, except:
+   one indistinguishable from an earlier declaration by the same entity (same
+   line, same ownership, same role), which carries nothing the first does not;
+   and the non-labelling end of a folded reciprocal, whose *role* is dropped
+   from the diagram — the entity's own relationship list in the Markdown still
+   carries it. That is ADR-0002's declaredly lossy view. Nothing else is
+   dropped, and no output depends on declaration order beyond the order the
+   lines are listed in.
 3. **`role` is the only label.** The `ownership` and `cardinality` fallbacks are
    gone; a relationship with no role gets an empty label. Precise counts already
    live in the Markdown table per ADR-0002, and spending label space on them
@@ -74,5 +87,13 @@ a diagram that quietly picks a winner among declarations hides a modeling
 question only the author can settle. The one place it does pick — which role
 labels a folded reciprocal — is a label choice inside a single line the model
 does say is one relationship, and the dropped role is still in the Markdown.
+
+The cost is that a pair with an ambiguous pairing renders more lines than its
+author probably wants, with no way to collapse them short of editing the model.
+That is the right side to err on: the alternative, a fold that guesses, is a
+diagram whose content changes when the YAML is reordered. `model.EdgeGroups`
+holds the one definition of which declarations could be the same line, and both
+the renderer and the linter read it, so the fold rule and the diagnostic cannot
+drift apart.
 
 Pinned by `TestADR_0008_*` in `internal/render/mermaid` and in `internal/lint`.

@@ -5,7 +5,6 @@ package mermaid
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -77,50 +76,18 @@ func rightMarker(m model.Multiplicity) string {
 // edge is one rendered relationship line, accumulated before emission so that
 // declarations of the same relationship from both ends fold into it.
 type edge struct {
-	from, to   string
-	card       string // as declared by `from`, so the markers read left to right
-	label      string
-	owned      bool
-	foldedFrom string // the opposite end already folded in, if any
+	from, to string
+	card     string // as declared by `from`, so the markers read left to right
+	label    string
+	owned    bool
 }
 
-// folds reports whether a declaration made by `from`, with the given ownership
-// and label, is the same drawn line as e rather than a second one. It is only
-// ever asked about declarations that already agree on the pair and on the
-// canonical cardinality (normalized to the sorted-pair orientation, so inverses
-// match). Two such declarations merge in exactly two cases (ADR-0008):
-//
-//   - opposite ends declared it and at most one of them claims `owned` — one
-//     relationship seen from two sides, whose ownership belongs to the
-//     relationship rather than to the end that named it. The two ends may name
-//     different roles: that is the ordinary composition pattern (a parent's
-//     "part" is a child's "whole"), not a conflict, so the label is chosen
-//     rather than compared (see merge). Only one opposite-end declaration
-//     folds in, mirroring the linter, which reconciles a pair only when each
-//     direction declares it exactly once.
-//   - the same end declared it twice with the same ownership and the same label
-//     — an exact duplicate, which would draw two indistinguishable lines. The
-//     label matters here: two declarations from one end with different roles
-//     (a User who is both `Owner` and `Member` of a Project) are two
-//     relationships.
-//
-// Everything else stays a distinct edge, so no declaration disappears from the
-// diagram: two declarations from the same end differing only in `ownership` are
-// two relationships, and mutual `owned` is a contradiction `modelith lint`
-// reports as an error.
-func (e *edge) folds(from, label string, owned bool) bool {
-	if e.from == from {
-		return e.owned == owned && e.label == label
-	}
-	return e.foldedFrom == "" && (!e.owned || !owned)
-}
-
-// merge folds a declaration into e, choosing the label the single drawn line
-// carries. The owning end wins, because its role names the relationship the
-// composition is about; with neither end owning, the end whose entity sorts
-// first wins, so the choice never depends on iteration order. The role the
-// diagram drops is still in that entity's relationship list in the Markdown —
-// the diagram is a declaredly lossy view (ADR-0002).
+// merge folds a reciprocal declaration into e, choosing the label the single
+// drawn line carries. The owning end wins, because its role names the
+// relationship the composition is about; with neither end owning, the end whose
+// entity sorts first wins, so the choice never depends on declaration order.
+// The role the diagram drops is still in that entity's relationship list in the
+// Markdown — the diagram is a declaredly lossy view (ADR-0002).
 func (e *edge) merge(from, label string, owned bool) {
 	switch {
 	case owned && !e.owned:
@@ -129,9 +96,6 @@ func (e *edge) merge(from, label string, owned bool) {
 		// The existing edge is the owning end; its label stands.
 	case from < e.from:
 		e.label = label
-	}
-	if from != e.from {
-		e.foldedFrom = from
 	}
 	e.owned = e.owned || owned
 }
@@ -159,47 +123,56 @@ func ER(m *model.Model) string {
 		b.WriteString("    }\n")
 	}
 
+	// A fold is a claim that two declarations are one relationship seen from two
+	// sides. That claim is only safe when each end declares the line at most
+	// once: with two declarations on one end, which is the reciprocal of which
+	// is undeterminable, and folding either would drop the other's role
+	// depending on declaration order. model.EdgeGroups makes that call, and
+	// `modelith lint` warns about the same groups (ADR-0008).
+	ambiguous := map[string]bool{}
+	for _, g := range model.EdgeGroups(m) {
+		if g.AmbiguousPairing() {
+			ambiguous[g.Key] = true
+		}
+	}
+
 	var edges []*edge
 	byKey := map[string][]*edge{}
+	seen := map[string]bool{}
 	for _, name := range m.EntityNames() {
 		for _, rel := range m.Entities[name].Relationships {
 			if rel.Entity == name {
 				continue // already rendered inside the entity's block
 			}
+			// Two declarations from one end that agree on everything draw two
+			// indistinguishable lines; the second carries nothing.
+			dk := model.DeclarationKey(name, rel)
+			if seen[dk] {
+				continue
+			}
+			seen[dk] = true
+
 			label := relationshipLabel(rel)
 			owned := rel.Ownership == "owned"
+			key := model.EdgeKey(name, rel)
 
-			// Group candidate declarations of one drawn line. The key is the
-			// pair plus the cardinality normalized to the sorted-pair
-			// orientation, so a relationship declared from both sides with
-			// inverse cardinalities (A "1:n" B, B "n:1" A) is a candidate to
-			// fold — while genuinely distinct edges (GO-3) or contradictory
-			// reciprocal declarations (GO-1) get distinct keys and both render,
-			// surfacing the conflict instead of silently dropping one. Matching
-			// the key is necessary but not sufficient: edge.folds decides.
-			pair := []string{name, rel.Entity}
-			sort.Strings(pair)
-			card := rel.Cardinality
-			if name != pair[0] {
-				card = model.InvertCardinality(card)
-			}
-			// Canonicalize so a relationship declared from both sides with
-			// semantically equal but differently written cardinalities
-			// ("1:n" and "0..n:1") dedupes to one edge.
-			card = model.CanonicalCardinality(card)
-			key := pair[0] + "\x00" + pair[1] + "\x00" + card
-
-			folded := false
-			for _, e := range byKey[key] {
-				if !e.folds(name, label, owned) {
+			// A reciprocal folds when the pairing is unambiguous, it comes from
+			// the opposite end, and at most one end claims `owned` — mutual
+			// `owned` is a contradiction, not a fold, and stays two lines with
+			// a lint error against it.
+			if !ambiguous[key] {
+				folded := false
+				for _, e := range byKey[key] {
+					if e.from == name || (e.owned && owned) {
+						continue
+					}
+					e.merge(name, label, owned)
+					folded = true
+					break
+				}
+				if folded {
 					continue
 				}
-				e.merge(name, label, owned)
-				folded = true
-				break
-			}
-			if folded {
-				continue
 			}
 			e := &edge{from: name, to: rel.Entity, card: rel.Cardinality, label: label, owned: owned}
 			byKey[key] = append(byKey[key], e)

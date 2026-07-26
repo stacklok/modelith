@@ -162,10 +162,11 @@ and covered in full in [Reading the Diagrams](./04-reading-the-diagrams.md):
   (non-identifying) for `referenced` and for an omitted `ownership`. It costs no
   label space. Ownership belongs to the relationship rather than the end that
   declared it, so a parent's `owned` and the child's `referenced` fold into one
-  solid line when their cardinalities are inverses — even when the two ends name
-  different roles, in which case the owning end's role labels the line and the
-  other stays in the Markdown. Declarations the renderer can't reduce to one
-  relationship draw as separate lines, and mutual `owned` is a lint error.
+  solid line when their cardinalities are inverses and each end declares it
+  once — even when the two ends name different roles, in which case the owning
+  end's role labels the line and the other stays in the Markdown. Declarations
+  the renderer can't reduce to one relationship draw as separate lines: mutual
+  `owned` is a lint error, and a pairing it can't resolve is a lint warning.
 - **`role` is the only label** — `ownership` and `cardinality` are never written
   on a line. Keep the role short; put the explanation in `note`.
 - **A self-referential relationship becomes a row inside the entity's box**
@@ -307,6 +308,9 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
     - a relationship `role` that reads as prose (too long for a label, more
       than four words, or ending a sentence) — the role is the only label on
       the rendered diagram line, so the explanation belongs in `note`;
+    - a pair where one end declares the same relationship more than once and
+      the other declares it back, so which is the reciprocal of which can't be
+      determined — the diagram draws every declaration as its own line;
     - an attribute `type` that looks like an enum reference (PascalCase) but
       names no defined enum;
     - an action `actor` that is neither a defined entity nor a glossary term.
