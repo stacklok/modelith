@@ -1,8 +1,5 @@
 # Modelith
 
-> **Early days.** The schema, CLI, output, and docs may still change in breaking
-> ways. Feedback is very much appreciated — kick the tires and file issues.
-
 Tooling for authoring, validating, and rendering **domain models** — the
 canonical, plain-language expression of what a system *is*: its concepts, how
 they relate, and the rules that govern them.
