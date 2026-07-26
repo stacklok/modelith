@@ -9,9 +9,15 @@ import (
 	"testing"
 )
 
-// fakeFiles is a map-backed FileReader keyed by cleaned, slash-separated path.
-// A hand-written fake rather than a mock: it behaves like the filesystem,
-// including reporting a missing file the way os.ReadFile does.
+// fakeFiles is a map-backed Files keyed by cleaned, slash-separated path. A
+// hand-written fake rather than a mock: it behaves like a filesystem, reporting
+// a missing file the way os.ReadFile does and answering containment from its own
+// tree. Containment is part of the fake because deciding it on the real disk
+// while reading from a map would make these cases depend on where the source
+// tree happens to sit, and on whether it is a git checkout at all.
+//
+// A ".git" key marks a repository, exactly as the entry does on disk. Paths in
+// the map are relative, so the whole tree hangs off ".".
 type fakeFiles map[string]string
 
 func (f fakeFiles) ReadFile(path string) ([]byte, error) {
@@ -20,6 +26,27 @@ func (f fakeFiles) ReadFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("open %s: %w", path, fs.ErrNotExist)
 	}
 	return []byte(src), nil
+}
+
+// Resolve cleans the path and stops there: the fake's keys are the whole world
+// and hold no symlinks, so there is nothing further to follow.
+func (f fakeFiles) Resolve(path string) string { return filepath.Clean(path) }
+
+// ResolutionRoot mirrors OSFiles.ResolutionRoot over the map: the nearest
+// ancestor holding a ".git" key, or the model's own directory when there is
+// none.
+func (f fakeFiles) ResolutionRoot(modelPath string) (string, bool) {
+	dir := filepath.Dir(filepath.Clean(modelPath))
+	for cur := dir; ; {
+		if _, ok := f[filepath.ToSlash(filepath.Join(cur, ".git"))]; ok {
+			return cur, true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return dir, false
+		}
+		cur = parent
+	}
 }
 
 // importerPath is where the model under test lives; its imports resolve
@@ -107,6 +134,10 @@ func TestImports_Resolution(t *testing.T) {
 	t.Parallel()
 
 	files := fakeFiles{
+		// The repository marker at the top of the fake tree is what lets an
+		// import reach a sibling directory; TestImports_ContainmentUsesTheFileSeam
+		// covers the tree without one.
+		".git":                             "",
 		"docs/payments.modelith.yaml":      paymentsModel,
 		"payments/payments.modelith.yaml":  paymentsModel,
 		"docs/legacy/pay-v2.modelith.yaml": paymentsModel,
@@ -240,6 +271,51 @@ func TestImports_Resolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			res, err := Run(importerPath, []byte(importer(tc.imports, tc.attrType)), files)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertFindings(t, importFindings(res.Findings), tc.want)
+		})
+	}
+}
+
+// TestImports_ContainmentUsesTheFileSeam pins that the boundary is judged
+// against the filesystem the reads go to, not against whatever tree the tests
+// happen to run in. The same model and the same import resolve or are refused
+// purely by whether the fake tree carries a repository marker, so neither case
+// depends on the source tree being a git checkout — copy it without .git (a
+// source tarball, a vendored module, a shallow CI export) and both still hold.
+func TestImports_ContainmentUsesTheFileSeam(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		files fakeFiles
+		want  []wantFinding
+	}{
+		{
+			name: "a repository above the model admits a sibling directory",
+			files: fakeFiles{
+				".git":                            "",
+				"payments/payments.modelith.yaml": paymentsModel,
+			},
+		},
+		{
+			name:  "no repository confines resolution to the model's directory",
+			files: fakeFiles{"payments/payments.modelith.yaml": paymentsModel},
+			want: []wantFinding{{
+				SeverityError, CategorySemantic, "/imports/0",
+				`import "../payments/payments.modelith.yaml" resolves to ` +
+					`"payments/payments.modelith.yaml", outside "docs" — this model is in no repository`,
+			}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			src := importer([]string{`"../payments/payments.modelith.yaml"`}, "payments.PaymentMethod")
+			res, err := Run(importerPath, []byte(src), tc.files)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -493,7 +569,7 @@ enums:
 `
 	read := map[string]int{}
 	files := countingFiles{
-		files: fakeFiles{
+		fakeFiles: fakeFiles{
 			"docs/payments.modelith.yaml": middle,
 			"docs/shipping.modelith.yaml": leaf,
 		},
@@ -515,15 +591,15 @@ enums:
 }
 
 // countingFiles records how many times each path was read, so a test can assert
-// a file was never opened.
+// a file was never opened. Everything else about the filesystem it inherits.
 type countingFiles struct {
-	files fakeFiles
-	read  map[string]int
+	fakeFiles
+	read map[string]int
 }
 
 func (c countingFiles) ReadFile(path string) ([]byte, error) {
 	c.read[filepath.ToSlash(filepath.Clean(path))]++
-	return c.files.ReadFile(path)
+	return c.fakeFiles.ReadFile(path)
 }
 
 // TestRun_QualifiedEntityReferenceIsDeferred checks the friendly error for a

@@ -11,7 +11,7 @@ import (
 // their target does not exist, where a loop would otherwise spin forever.
 const maxSymlinkHops = 40
 
-// resolutionRoot returns the directory an import may not resolve outside of,
+// ResolutionRoot returns the directory an import may not resolve outside of,
 // and whether an enclosing repository defined it. The root is the nearest
 // ancestor of the model holding a `.git` entry; failing that, the model's own
 // directory, because outside a repository the tool cannot know the project's
@@ -27,7 +27,7 @@ const maxSymlinkHops = 40
 // and every candidate import is judged after the same resolution, so seeding
 // the walk with the unresolved path would compare the two against different
 // trees.
-func resolutionRoot(modelPath string) (root string, inRepo bool) {
+func (OSFiles) ResolutionRoot(modelPath string) (root string, inRepo bool) {
 	dir := realPath(absolute(filepath.Dir(modelPath)))
 	for cur := dir; ; {
 		if _, err := os.Lstat(filepath.Join(cur, ".git")); err == nil {
@@ -40,6 +40,10 @@ func resolutionRoot(modelPath string) (root string, inRepo bool) {
 		cur = parent
 	}
 }
+
+// Resolve returns path as the local filesystem sees it: absolute against the
+// working directory, then symlink-resolved as far as the filesystem allows.
+func (OSFiles) Resolve(path string) string { return realPath(absolute(path)) }
 
 // withinRoot reports whether candidate sits at or below root. Both must already
 // be absolute, cleaned and symlink-resolved. filepath.Rel decides it rather

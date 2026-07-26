@@ -78,12 +78,13 @@ var (
 )
 
 // Run validates the model at path and returns all findings. src is the model's
-// own bytes; fr reads the files its `imports:` name, resolved relative to
-// path's directory. A nil fr reads them from the local filesystem.
-func Run(path string, src []byte, fr FileReader) (*Result, error) {
+// own bytes; files reads the ones its `imports:` name, resolved relative to
+// path's directory, and answers where that resolution is confined. A nil files
+// uses the local filesystem.
+func Run(path string, src []byte, files Files) (*Result, error) {
 	res := &Result{}
-	if fr == nil {
-		fr = OSFiles{}
+	if files == nil {
+		files = OSFiles{}
 	}
 
 	// Layer 1: structural validation against the JSON Schema.
@@ -114,7 +115,7 @@ func Run(path string, src []byte, fr FileReader) (*Result, error) {
 	// follows would tell the author to write syntax that cannot work — the same
 	// reason the version check gates schema validation.
 	if structuralOK {
-		runImports(path, m, fr, res)
+		runImports(path, m, files, res)
 	}
 	runRelationshipShape(m, res)
 	runSubtypes(m, res)

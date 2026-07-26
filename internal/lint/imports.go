@@ -12,16 +12,30 @@ import (
 	"github.com/stacklok/modelith/internal/schema"
 )
 
-// FileReader reads an imported model file by path. It is the seam that keeps
-// lint's file access substitutable in tests.
+// Files is the filesystem seam import resolution runs on: reading an imported
+// model, and the two path questions that decide whether it may be read at all.
+// Reading and containment sit behind one interface deliberately — judging the
+// boundary against the local disk while reading from somewhere else would
+// confine imports on a filesystem the reads never touch.
 //
 // It is not an fs.FS: fs.ValidPath rejects "..", and peer models commonly sit
 // in sibling directories, so "../payments/payments.modelith.yaml" has to work.
-type FileReader interface {
+type Files interface {
+	// ReadFile reads the named file.
 	ReadFile(path string) ([]byte, error)
+	// ResolutionRoot returns the directory an import of the model at modelPath
+	// may not resolve outside of, and whether an enclosing repository defined
+	// it (ADR-0013).
+	ResolutionRoot(modelPath string) (root string, inRepo bool)
+	// Resolve returns path as this filesystem sees it — absolute, cleaned, and
+	// symlink-resolved as far as it can be — so containment judges where a path
+	// lands rather than how it was written. It must agree with ResolutionRoot:
+	// the two results are compared against each other.
+	Resolve(path string) string
 }
 
-// OSFiles reads imported models from the local filesystem.
+// OSFiles resolves imported models against the local filesystem. Its path
+// methods are in root.go, alongside the containment rules they implement.
 type OSFiles struct{}
 
 // ReadFile reads the named file from the local filesystem.
@@ -50,8 +64,8 @@ type importedModel struct {
 //
 // modelPath is the path of the model being linted; imports resolve relative to
 // its directory.
-func runImports(modelPath string, m *model.Model, fr FileReader, res *Result) {
-	byScope, claimed := loadImports(modelPath, m, fr, res)
+func runImports(modelPath string, m *model.Model, files Files, res *Result) {
+	byScope, claimed := loadImports(modelPath, m, files, res)
 	used := checkQualifiedTypes(m, byScope, claimed, res)
 	// An unreferenced import is a completeness finding, alongside the unused
 	// enum and the unused glossary term: vocabulary the model declares and
@@ -79,14 +93,14 @@ func runImports(modelPath string, m *model.Model, fr FileReader, res *Result) {
 // list claimed at all — including entries that then failed to load — mapped to
 // the path of the first entry that claimed it. Every rejection is reported as an
 // error: an import that cannot be resolved is a broken reference, not a gap.
-func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) (byScope map[string]importedModel, claimed map[string]string) {
+func loadImports(modelPath string, m *model.Model, files Files, res *Result) (byScope map[string]importedModel, claimed map[string]string) {
 	byScope = map[string]importedModel{}
 	claimed = map[string]string{}
 	if len(m.Imports) == 0 {
 		return byScope, claimed
 	}
 	dir := filepath.Dir(modelPath)
-	root, inRepo := resolutionRoot(modelPath)
+	root, inRepo := files.ResolutionRoot(modelPath)
 	for i, imp := range m.Imports {
 		reject := func(format string, args ...any) {
 			res.Findings = append(res.Findings, Finding{
@@ -141,7 +155,7 @@ func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) (
 		// model from an untrusted source probe the filesystem of whatever runner
 		// lints it (ADR-0013).
 		joined := filepath.Join(dir, imp.Path)
-		if resolved := realPath(absolute(joined)); !withinRoot(root, resolved) {
+		if resolved := files.Resolve(joined); !withinRoot(root, resolved) {
 			if inRepo {
 				reject("import %q resolves to %q, outside %q — that directory is the repository holding this model (the nearest ancestor with a .git entry), and an import may not name a file beyond it",
 					imp.Path, resolved, root)
@@ -151,7 +165,7 @@ func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) (
 			}
 			continue
 		}
-		data, err := fr.ReadFile(joined)
+		data, err := files.ReadFile(joined)
 		if err != nil {
 			reject("import %q cannot be read: %v", imp.Path, err)
 			continue
