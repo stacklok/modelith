@@ -18,9 +18,20 @@ file wins.
   build flags (`LDFLAGS`) live; routing through it keeps them centralized.
 - The binary is static: `CGO_ENABLED=0`, no cgo dependencies. Verify a new
   dependency doesn't pull in cgo before adding it.
-- One binary, no runtime dependencies. modelith reads and writes files and
-  prints diagnostics. If a feature seems to need a network call, a daemon, or
-  a browser, that's a sign to redesign it, not to add the dependency.
+- One binary, no runtime dependencies for the common path. modelith reads and
+  writes files and prints diagnostics. If a feature seems to need a daemon or a
+  browser, that's a sign to redesign it, not to add the dependency.
+- **`lint` and `render` never perform network I/O**, whatever flags are passed,
+  and neither do `internal/lint`, `internal/render/...`, `internal/schema`, or
+  `internal/model`. `TestADR_0011_OfflinePackages` enforces this by walking
+  their transitive imports for `net`, `net/http`, and `os/exec` — `os/exec` is
+  banned there so the rule can't be evaded by shelling out to `curl`. A
+  proposal to relax this for convenience is refused; see
+  [`0011-network-boundary.md`](../../project-docs/adr/0011-network-boundary.md).
+- A command that does use the network says so in its name, runs only when
+  asked, and never as a side effect of another command. It delegates transport
+  to `git`/`gh` rather than adding an HTTP client, so the binary holds no TLS
+  configuration and no credentials.
 
 ## Dependencies
 

@@ -33,9 +33,10 @@ as the old rule said.
 
 **Commands that use the network say so in their name and are opt-in.** They
 live under a distinct subcommand group, never run implicitly as a side effect
-of another command, and never run at all unless asked. Where a check spans both
-worlds — verifying a local file versus asking whether its origin moved — the
-offline half is the default and the online half is a flag.
+of another command, and never run at all unless asked. Where a question spans
+both worlds — verifying a local file versus asking whether its origin moved —
+the offline half belongs to the command people already run and the online half
+is a separate command, not a flag on the first.
 
 **modelith does not implement network transport.** It shells out to `git` and
 `gh`, which already handle authentication, private hosts, proxies, SSH agents,
@@ -58,9 +59,11 @@ credential handling. This is the choice `cmd/go` made for VCS fetches.
 
 ## Consequences
 
-- `go-style.md` is updated to state the boundary rather than the prohibition.
-  Where that file and this ADR disagree, this ADR is the decision and the file
-  is stale.
+- `go-style.md` is updated in this change to state the boundary rather than the
+  prohibition, so the two do not disagree. That file remains authoritative on
+  Go conventions per `CLAUDE.md`; an ADR records why a rule changed, it does not
+  outrank the rule file. Keeping them in step matters because `go-style.md`
+  loads on every Go edit and an ADR does not.
 - A future proposal to make `lint` or `render` reach the network is refused by
   this ADR, whatever the convenience argument.
 - Adding an HTTP client to any package remains off the table; a network-using
@@ -69,6 +72,12 @@ credential handling. This is the choice `cmd/go` made for VCS fetches.
   of the offline packages and fails if any of them reaches `net`, `net/http`,
   or `os/exec`. Banning `os/exec` there is deliberate: without it the rule
   could be evaded by shelling out to `curl`.
+- That test guards the library packages, not the commands. `cmd/modelith`
+  reaches `net` transitively through `spf13/pflag` today, and the network-using
+  commands will legitimately import `os/exec`, so the package-level ban cannot
+  extend there. "No flag makes `lint` fetch" is therefore a design commitment
+  enforced by the library boundary rather than a claim a test proves end to
+  end; a command-level guard would need to assert on wiring, not imports.
 - The offline packages import `net/url` and `net/netip` today, via the JSON
   Schema library's format validation. Both are parsers that perform no I/O, so
   they are permitted by name.
