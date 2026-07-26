@@ -24,11 +24,16 @@ type OSFiles struct{}
 // ReadFile reads the named file from the local filesystem.
 func (OSFiles) ReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
 
-// qualifiedRefRE matches a cross-model reference, "scope.Name". The scope side
-// mirrors the schema's scope pattern; the name side stays loose so a reference
-// to something that isn't a defined enum is reported as a broken reference
-// rather than silently read as a primitive type.
-var qualifiedRefRE = regexp.MustCompile(`^([a-z][a-z0-9-]*)\.([A-Za-z0-9]+)$`)
+var (
+	// qualifiedRefRE matches a cross-model reference, "scope.Name". The scope
+	// side mirrors the schema's scope pattern; the name side stays loose so a
+	// reference to something that isn't a defined enum is reported as a broken
+	// reference rather than silently read as a primitive type.
+	qualifiedRefRE = regexp.MustCompile(`^([a-z][a-z0-9-]*)\.([A-Za-z0-9]+)$`)
+	// scopeRE is the slug a bare import's filename has to yield. An explicitly
+	// written scope is held to the same pattern by the schema.
+	scopeRE = regexp.MustCompile(`^[a-z][a-z0-9-]+$`)
+)
 
 // importedModel is one successfully resolved entry of a model's imports list.
 type importedModel struct {
@@ -45,6 +50,10 @@ type importedModel struct {
 func runImports(modelPath string, m *model.Model, fr FileReader, res *Result) {
 	byScope := loadImports(modelPath, m, fr, res)
 	used := checkQualifiedTypes(m, byScope, res)
+	// An unreferenced import is a completeness finding, alongside the unused
+	// enum and the unused glossary term: vocabulary the model declares and
+	// nothing uses. Sharing their category means sharing their promotion under
+	// --completeness error.
 	for _, scope := range sortedMapKeys(byScope) {
 		if used[scope] {
 			continue
@@ -52,7 +61,7 @@ func runImports(modelPath string, m *model.Model, fr FileReader, res *Result) {
 		imp := byScope[scope]
 		res.Findings = append(res.Findings, Finding{
 			Severity: SeverityWarning,
-			Category: CategorySemantic,
+			Category: CategoryCompleteness,
 			Path:     fmt.Sprintf("/imports/%d", imp.index),
 			Message: fmt.Sprintf(
 				"import %q (scope %q) is never referenced — drop it, or reference one of its enums as %s.Name in an attribute type",
@@ -63,8 +72,9 @@ func runImports(modelPath string, m *model.Model, fr FileReader, res *Result) {
 }
 
 // loadImports reads each declared import and returns the ones that resolved,
-// keyed by the scope they declare. Every rejection is reported as an error: an
-// import that cannot be resolved is a broken reference, not a gap.
+// keyed by the scope the importing model binds them to. Every rejection is
+// reported as an error: an import that cannot be resolved is a broken
+// reference, not a gap.
 func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) map[string]importedModel {
 	byScope := map[string]importedModel{}
 	dir := filepath.Dir(modelPath)
@@ -77,33 +87,37 @@ func loadImports(modelPath string, m *model.Model, fr FileReader, res *Result) m
 				Message:  fmt.Sprintf(format, args...),
 			})
 		}
-		if imp == "" {
+		if imp.Path == "" {
 			continue // the schema's minLength reports the empty path
 		}
-		if filepath.IsAbs(imp) || imp[0] == '/' {
-			reject("import %q is an absolute path — imports are relative to this model so they resolve in any checkout", imp)
+		if filepath.IsAbs(imp.Path) || imp.Path[0] == '/' {
+			reject("import %q is an absolute path — imports are relative to this model so they resolve in any checkout", imp.Path)
 			continue
 		}
-		data, err := fr.ReadFile(filepath.Join(dir, imp))
+		// A written scope is held to the pattern by the schema; a derived one the
+		// schema never sees, and a filename that yields no usable slug is the
+		// case the explicit form exists for.
+		if imp.ScopeFromPath && !scopeRE.MatchString(imp.Scope) {
+			reject("import %q binds the scope %q taken from its filename, which is not a valid slug (lowercase kebab-case) — name the scope explicitly instead: `- {scope: <slug>, path: %s}`",
+				imp.Path, imp.Scope, imp.Path)
+			continue
+		}
+		data, err := fr.ReadFile(filepath.Join(dir, imp.Path))
 		if err != nil {
-			reject("import %q cannot be read: %v", imp, err)
+			reject("import %q cannot be read: %v", imp.Path, err)
 			continue
 		}
 		im, err := model.Parse(data)
 		if err != nil || im.Kind != "DomainModel" {
-			reject("import %q is not a domain model — lint it on its own with `modelith lint` to see why", imp)
+			reject("import %q is not a domain model — lint it on its own with `modelith lint` to see why", imp.Path)
 			continue
 		}
-		if im.Scope == "" {
-			reject("import %q declares no `scope:` — a model needs a scope slug to be imported, since that slug is how this model names its items", imp)
+		if prev, ok := byScope[imp.Scope]; ok {
+			reject("import %q binds scope %q, which import %q already binds — give one of them an explicit, different scope so %s.Name resolves unambiguously",
+				imp.Path, imp.Scope, prev.path, imp.Scope)
 			continue
 		}
-		if prev, ok := byScope[im.Scope]; ok {
-			reject("import %q declares scope %q, which import %q already declares — rename one model's scope so %s.Name resolves unambiguously",
-				imp, im.Scope, prev.path, im.Scope)
-			continue
-		}
-		byScope[im.Scope] = importedModel{index: i, path: imp, model: im}
+		byScope[imp.Scope] = importedModel{index: i, path: imp.Path, model: im}
 	}
 	return byScope
 }
@@ -135,7 +149,7 @@ func checkQualifiedTypes(m *model.Model, byScope map[string]importedModel, res *
 			}
 			imp, ok := byScope[scope]
 			if !ok {
-				broken("attribute type %q references scope %q, which this model does not import — add the model that declares that scope to `imports:`", attr.Type, scope)
+				broken("attribute type %q references the scope %q, which no import binds — add the model that defines %s to `imports:`", attr.Type, scope, item)
 				continue
 			}
 			// The import is referenced even when the item does not resolve, so

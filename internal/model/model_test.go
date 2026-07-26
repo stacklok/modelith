@@ -162,3 +162,88 @@ func TestParseCardinality(t *testing.T) {
 		t.Error("ParseCardinality with an inverted range should not be ok")
 	}
 }
+
+// TestParseImportForms covers the imports union: a bare path binds the scope its
+// filename yields, an object names the scope outright, and a derived scope is
+// marked so the linter can tell the two apart.
+func TestParseImportForms(t *testing.T) {
+	t.Parallel()
+
+	src := `
+kind: DomainModel
+version: v1
+imports:
+  - ./payments.modelith.yaml
+  - scope: billing
+    path: ./legacy/pay-v2.modelith.yaml
+entities:
+  Project:
+    definition: A thing.
+`
+	m, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []Import{
+		{Scope: "payments", Path: "./payments.modelith.yaml", ScopeFromPath: true},
+		{Scope: "billing", Path: "./legacy/pay-v2.modelith.yaml"},
+	}
+	if len(m.Imports) != len(want) {
+		t.Fatalf("expected %d imports, got %+v", len(want), m.Imports)
+	}
+	for i, w := range want {
+		if m.Imports[i] != w {
+			t.Errorf("import %d: got %+v, want %+v", i, m.Imports[i], w)
+		}
+	}
+}
+
+func TestParseRejectsMalformedImport(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"null entry":      "imports:\n  - ~\n",
+		"unknown field":   "imports:\n  - {scope: a, path: b, extra: c}\n",
+		"wrong item type": "imports:\n  - [./a.modelith.yaml]\n",
+	}
+	for name, block := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := Parse([]byte("kind: DomainModel\nversion: v1\n" + block)); err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+		})
+	}
+}
+
+func TestScopeFromPath(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"./payments.modelith.yaml":        "payments",
+		"../shared/billing.modelith.yaml": "billing",
+		"./legacy/pay-v2.yaml":            "pay-v2",
+		"./Payments.modelith.yaml":        "Payments",
+		"noextension":                     "noextension",
+	}
+	for in, want := range cases {
+		if got := ScopeFromPath(in); got != want {
+			t.Errorf("ScopeFromPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRenderedPath(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"./payments.modelith.yaml": "./payments.modelith.md",
+		"../a/b.yml":               "../a/b.md",
+		"weird":                    "weird.md",
+	}
+	for in, want := range cases {
+		if got := RenderedPath(in); got != want {
+			t.Errorf("RenderedPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

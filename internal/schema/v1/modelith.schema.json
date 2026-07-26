@@ -25,17 +25,11 @@
       "description": "Optional one-paragraph summary of what this model covers.",
       "type": "string"
     },
-    "scope": {
-      "description": "Kebab-case slug naming this model where another model references its items as \"scope.Name\". Optional — a model nobody imports never needs one — but required in order to be imported. Declared here and nowhere restated: an importing model lists a path, not a slug.",
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9-]+$"
-    },
     "imports": {
-      "description": "Paths to other model files whose items this model references, each relative to this file (\"..\" is fine; an absolute path is not portable across checkouts and is rejected). Each listed file declares its own \"scope\". Resolution does not recurse: only items defined directly in a listed file are reachable.",
+      "description": "Other model files whose items this model references. Each entry is a path relative to this file — \"..\" is fine; an absolute path is not portable across checkouts and is rejected — and binds a scope this model writes before an imported item's name (\"payments.PaymentMethod\"). Resolution does not recurse: only items defined directly in a listed file are reachable.",
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "#/$defs/import"
       }
     },
     "glossary": {
@@ -77,6 +71,37 @@
     }
   },
   "$defs": {
+    "import": {
+      "title": "Import",
+      "description": "Another model this one references: either a bare path (the scope is the file's basename with its extension stripped) or an object naming the scope explicitly.",
+      "oneOf": [
+        {
+          "description": "A path to a model file, relative to this one. Its basename with \".modelith.yaml\" (or the final extension) stripped is the scope.",
+          "type": "string",
+          "minLength": 1
+        },
+        { "$ref": "#/$defs/importObject" }
+      ]
+    },
+    "importObject": {
+      "title": "Import (explicit scope)",
+      "description": "An import that names its scope, for a file whose basename is not a usable slug or is already bound by another import.",
+      "type": "object",
+      "required": ["scope", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "description": "The slug this model writes before an item's name to reference it (\"payments\" in \"payments.PaymentMethod\"). Lowercase kebab-case. Local to this model: the imported file does not declare it, and another model may bind the same file to a different scope.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]+$"
+        },
+        "path": {
+          "description": "Path to the model file, relative to this one.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "enum": {
       "title": "Enum",
       "type": "object",

@@ -152,6 +152,54 @@ func TestGoldenExample(t *testing.T) {
 	}
 }
 
+// TestRenderImports_SectionAndLinkedTypes checks the imports section and the
+// deep link on a qualified attribute type. The renderer never opens an imported
+// file: the scope comes from the import that bound it and the anchor from the
+// heading format enums render with, so the output stays a pure function of this
+// model (ADR-0010, ADR-0012).
+func TestRenderImports_SectionAndLinkedTypes(t *testing.T) {
+	t.Parallel()
+
+	m := &model.Model{
+		Imports: []model.Import{
+			{Scope: "payments", Path: "../payments/payments.modelith.yaml", ScopeFromPath: true},
+			{Scope: "billing", Path: "./legacy/pay-v2.modelith.yaml"},
+		},
+		Entities: map[string]model.Entity{
+			"Ticket": {
+				Definition: "A temporary entry credential.",
+				Attributes: []model.Attribute{
+					{Name: "paidWith", Type: "payments.PaymentMethod"},
+					{Name: "plan", Type: "billing.Plan"},
+					{Name: "unbound", Type: "shipping.Carrier"},
+					{Name: "issuedAt", Type: "timestamp"},
+				},
+			},
+		},
+	}
+	got := Render(m)
+
+	for _, want := range []string{
+		"## Imports\n",
+		"- **`payments`** — [`../payments/payments.modelith.yaml`](../payments/payments.modelith.md)\n",
+		"- **`billing`** — [`./legacy/pay-v2.modelith.yaml`](./legacy/pay-v2.modelith.md)\n",
+		"| `paidWith` | [payments.PaymentMethod](../payments/payments.modelith.md#paymentmethod) |  |\n",
+		"| `plan` | [billing.Plan](./legacy/pay-v2.modelith.md#plan) |  |\n",
+		// A scope no import binds is a lint error; the renderer states it rather
+		// than linking to a file it has no reason to believe exists.
+		"| `unbound` | shipping.Carrier |  |\n",
+		"| `issuedAt` | timestamp |  |\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in:\n%s", want, got)
+		}
+	}
+
+	if strings.Contains(Render(&model.Model{Entities: m.Entities}), "## Imports") {
+		t.Error("did not expect an Imports section when there are no imports")
+	}
+}
+
 // TestRenderEntity_SubtypeHierarchy checks that a child names its supertype and
 // a parent lists its subtypes.
 func TestRenderEntity_SubtypeHierarchy(t *testing.T) {

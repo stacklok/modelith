@@ -37,6 +37,7 @@ func TestSchemaStructSync(t *testing.T) {
 		{"Enum", []string{"$defs", "enum"}, reflect.TypeOf(Enum{})},
 		{"EnumValue", []string{"$defs", "enumValue"}, reflect.TypeOf(EnumValue{})},
 		{"Action", []string{"$defs", "actionObject"}, reflect.TypeOf(Action{})},
+		{"Import", []string{"$defs", "importObject"}, reflect.TypeOf(Import{})},
 		{"Invariant", []string{"$defs", "invariant"}, reflect.TypeOf(Invariant{})},
 	}
 

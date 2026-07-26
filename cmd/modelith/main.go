@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"strings"
 
@@ -263,13 +262,10 @@ func renderCmd() *cobra.Command {
 	return cmd
 }
 
-func defaultOut(in string) string {
-	ext := filepath.Ext(in)
-	if ext == ".yaml" || ext == ".yml" {
-		return strings.TrimSuffix(in, ext) + ".md"
-	}
-	return in + ".md"
-}
+// defaultOut is where render writes when no -o is given. It is the same
+// mapping the renderer uses for its links into an imported model's Markdown, so
+// the two cannot disagree about where a model's .md lives.
+func defaultOut(in string) string { return model.RenderedPath(in) }
 
 // ---- schema ----
 

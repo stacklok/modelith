@@ -28,7 +28,6 @@ const importerPath = "docs/garage.modelith.yaml"
 
 const paymentsModel = `kind: DomainModel
 version: v1
-scope: payments
 title: Payments
 enums:
   PaymentMethod:
@@ -42,14 +41,15 @@ entities:
 `
 
 // importer builds a model that lists the given imports and types one attribute
-// with the given type.
+// with the given type. Each entry is written verbatim as a YAML sequence item,
+// so a case can use either the bare-path form or the explicit {scope, path} one.
 func importer(imports []string, attrType string) string {
 	var b strings.Builder
-	b.WriteString("kind: DomainModel\nversion: v1\nscope: garage\n")
+	b.WriteString("kind: DomainModel\nversion: v1\n")
 	if len(imports) > 0 {
 		b.WriteString("imports:\n")
 		for _, imp := range imports {
-			fmt.Fprintf(&b, "  - %q\n", imp)
+			fmt.Fprintf(&b, "  - %s\n", imp)
 		}
 	}
 	fmt.Fprintf(&b, `entities:
@@ -107,13 +107,10 @@ func TestImports_Resolution(t *testing.T) {
 	t.Parallel()
 
 	files := fakeFiles{
-		"docs/payments.modelith.yaml":     paymentsModel,
-		"payments/payments.modelith.yaml": paymentsModel,
-		"docs/billing.modelith.yaml": strings.Replace(paymentsModel,
-			"title: Payments", "title: Billing", 1),
-		"docs/anonymous.modelith.yaml": strings.Replace(paymentsModel,
-			"scope: payments\n", "", 1),
-		"docs/not-a-model.yaml": "kind: SomethingElse\nversion: v1\n",
+		"docs/payments.modelith.yaml":      paymentsModel,
+		"payments/payments.modelith.yaml":  paymentsModel,
+		"docs/legacy/pay-v2.modelith.yaml": paymentsModel,
+		"docs/not-a-model.yaml":            "kind: SomethingElse\nversion: v1\n",
 	}
 
 	const typePath = "/entities/Visit/attributes/0/type"
@@ -126,12 +123,12 @@ func TestImports_Resolution(t *testing.T) {
 	}{
 		{
 			name:     "peer import resolves",
-			imports:  []string{"./payments.modelith.yaml"},
+			imports:  []string{`"./payments.modelith.yaml"`},
 			attrType: "payments.PaymentMethod",
 		},
 		{
 			name:     "parent-relative import resolves",
-			imports:  []string{"../payments/payments.modelith.yaml"},
+			imports:  []string{`"../payments/payments.modelith.yaml"`},
 			attrType: "payments.PaymentMethod",
 		},
 		{
@@ -139,22 +136,22 @@ func TestImports_Resolution(t *testing.T) {
 			attrType: "payments.PaymentMethod",
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, typePath,
-				`references scope "payments", which this model does not import`,
+				`references the scope "payments", which no import binds`,
 			}},
 		},
 		{
 			name:     "qualified type naming an unimported scope",
-			imports:  []string{"./payments.modelith.yaml"},
+			imports:  []string{`"./payments.modelith.yaml"`},
 			attrType: "shipping.Carrier",
 			want: []wantFinding{
 				{SeverityError, CategorySemantic, typePath,
-					`references scope "shipping", which this model does not import`},
-				{SeverityWarning, CategorySemantic, "/imports/0", "is never referenced"},
+					`references the scope "shipping", which no import binds`},
+				{SeverityWarning, CategoryCompleteness, "/imports/0", "is never referenced"},
 			},
 		},
 		{
 			name:     "qualified type naming no enum in the imported model",
-			imports:  []string{"./payments.modelith.yaml"},
+			imports:  []string{`"./payments.modelith.yaml"`},
 			attrType: "payments.Nonexistent",
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, typePath,
@@ -163,7 +160,7 @@ func TestImports_Resolution(t *testing.T) {
 		},
 		{
 			name:     "qualified type resolving to an entity, not an enum",
-			imports:  []string{"./payments.modelith.yaml"},
+			imports:  []string{`"./payments.modelith.yaml"`},
 			attrType: "payments.Invoice",
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, typePath,
@@ -171,26 +168,31 @@ func TestImports_Resolution(t *testing.T) {
 			}},
 		},
 		{
-			name:     "two imports declaring the same scope",
-			imports:  []string{"./payments.modelith.yaml", "./billing.modelith.yaml"},
+			name:     "explicit scope overrides the filename",
+			imports:  []string{"{scope: billing, path: ./legacy/pay-v2.modelith.yaml}"},
+			attrType: "billing.PaymentMethod",
+		},
+		{
+			name:     "two imports binding the same scope",
+			imports:  []string{`"./payments.modelith.yaml"`, `"../payments/payments.modelith.yaml"`},
 			attrType: "payments.PaymentMethod",
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, "/imports/1",
-				`declares scope "payments", which import "./payments.modelith.yaml" already declares`,
+				`binds scope "payments", which import "./payments.modelith.yaml" already binds`,
 			}},
 		},
 		{
-			name:     "import declaring no scope",
-			imports:  []string{"./anonymous.modelith.yaml"},
+			name:     "bare import whose filename is not a usable slug",
+			imports:  []string{`"./PayMents.modelith.yaml"`},
 			attrType: "string",
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, "/imports/0",
-				"declares no `scope:`",
+				"which is not a valid slug",
 			}},
 		},
 		{
 			name:     "absolute import path",
-			imports:  []string{"/abs/payments.modelith.yaml"},
+			imports:  []string{`"/abs/payments.modelith.yaml"`},
 			attrType: "string",
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, "/imports/0",
@@ -199,7 +201,7 @@ func TestImports_Resolution(t *testing.T) {
 		},
 		{
 			name:     "unreadable import",
-			imports:  []string{"./missing.modelith.yaml"},
+			imports:  []string{`"./missing.modelith.yaml"`},
 			attrType: "string",
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, "/imports/0",
@@ -208,7 +210,7 @@ func TestImports_Resolution(t *testing.T) {
 		},
 		{
 			name:     "import that is not a domain model",
-			imports:  []string{"./not-a-model.yaml"},
+			imports:  []string{`"./not-a-model.yaml"`},
 			attrType: "string",
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, "/imports/0",
@@ -217,10 +219,10 @@ func TestImports_Resolution(t *testing.T) {
 		},
 		{
 			name:     "import nothing references",
-			imports:  []string{"./payments.modelith.yaml"},
+			imports:  []string{`"./payments.modelith.yaml"`},
 			attrType: "string",
 			want: []wantFinding{{
-				SeverityWarning, CategorySemantic, "/imports/0",
+				SeverityWarning, CategoryCompleteness, "/imports/0",
 				"is never referenced",
 			}},
 		},
@@ -254,7 +256,6 @@ func TestADR_0010_NonTransitiveResolution(t *testing.T) {
 
 	const middle = `kind: DomainModel
 version: v1
-scope: payments
 imports:
   - "./shipping.modelith.yaml"
 entities:
@@ -263,7 +264,6 @@ entities:
 `
 	const leaf = `kind: DomainModel
 version: v1
-scope: shipping
 enums:
   Carrier:
     values:
@@ -278,14 +278,14 @@ enums:
 		read: read,
 	}
 
-	res, err := Run(importerPath, []byte(importer([]string{"./payments.modelith.yaml"}, "shipping.Carrier")), files)
+	res, err := Run(importerPath, []byte(importer([]string{`"./payments.modelith.yaml"`}, "shipping.Carrier")), files)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertFindings(t, importFindings(res.Findings), []wantFinding{
 		{SeverityError, CategorySemantic, "/entities/Visit/attributes/0/type",
-			`references scope "shipping", which this model does not import`},
-		{SeverityWarning, CategorySemantic, "/imports/0", "is never referenced"},
+			`references the scope "shipping", which no import binds`},
+		{SeverityWarning, CategoryCompleteness, "/imports/0", "is never referenced"},
 	})
 	if n := read["docs/shipping.modelith.yaml"]; n != 0 {
 		t.Errorf("an imported model's own imports must not be read, but shipping was read %d time(s)", n)
@@ -377,7 +377,7 @@ func TestRun_NilFileReaderReadsFromDisk(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "payments.modelith.yaml"), []byte(paymentsModel), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	src := importer([]string{"./payments.modelith.yaml"}, "payments.PaymentMethod")
+	src := importer([]string{`"./payments.modelith.yaml"`}, "payments.PaymentMethod")
 	res, err := Run(filepath.Join(dir, "garage.modelith.yaml"), []byte(src), nil)
 	if err != nil {
 		t.Fatal(err)

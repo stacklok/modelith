@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,14 +23,11 @@ type Model struct {
 	Version     string `json:"version"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
-	// Scope is the slug another model writes before an item's name
-	// ("payments.PaymentMethod") when it imports this one. It is declared here
-	// and nowhere restated, so nothing can disagree about the slug.
-	Scope string `json:"scope,omitempty"`
-	// Imports are paths to other model files, relative to this one, whose items
-	// this model may reference. Resolution does not recurse: an imported model's
-	// own imports are not reachable from here (ADR-0010).
-	Imports   []string          `json:"imports,omitempty"`
+	// Imports are the other model files this one references, each bound to the
+	// scope written at its reference sites. Resolution does not recurse: an
+	// imported model's own imports are not reachable from here (ADR-0010,
+	// ADR-0012).
+	Imports   []Import          `json:"imports,omitempty"`
 	Glossary  map[string]string `json:"glossary,omitempty"`
 	Enums     map[string]Enum   `json:"enums,omitempty"`
 	Entities  map[string]Entity `json:"entities,omitempty"`
@@ -38,6 +36,69 @@ type Model struct {
 	// single owner. They share the per-entity invariant shape, and their ids
 	// share one namespace with entity invariants (unique across the model).
 	Invariants []Invariant `json:"invariants,omitempty"`
+}
+
+// Import is another model file this one references, bound to the scope written
+// before an imported item's name ("payments.PaymentMethod"). The binding is the
+// importer's: the imported file says nothing about how it is named here, so two
+// models may bind the same file to different scopes (ADR-0012).
+type Import struct {
+	Scope string `json:"scope"`
+	Path  string `json:"path"`
+	// ScopeFromPath records that Scope came from Path's basename rather than
+	// being written out, so the linter can point at the explicit form when a
+	// filename yields an unusable slug. The schema validates an explicit scope
+	// itself; a derived one it never sees.
+	ScopeFromPath bool `json:"-"`
+}
+
+// UnmarshalJSON lets an import be written as a bare path ("./payments.modelith.yaml",
+// whose basename gives the scope) or as an object naming the scope explicitly
+// ({scope: billing, path: ./legacy/pay-v2.modelith.yaml}).
+func (i *Import) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return fmt.Errorf("import must be a path string or an object, not null")
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return err
+		}
+		*i = Import{Scope: ScopeFromPath(s), Path: s, ScopeFromPath: true}
+		return nil
+	}
+	type rawImport Import
+	var r rawImport
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&r); err != nil {
+		return err
+	}
+	*i = Import(r)
+	return nil
+}
+
+// ScopeFromPath derives the scope a bare import path binds: the basename with
+// ".modelith.yaml" — or failing that, the final extension — stripped. The
+// result is not guaranteed to be a valid slug; the linter reports one that
+// isn't, since only an explicitly written scope passes through the schema.
+func ScopeFromPath(p string) string {
+	base := path.Base(p)
+	if trimmed, ok := strings.CutSuffix(base, ".modelith.yaml"); ok {
+		return trimmed
+	}
+	return strings.TrimSuffix(base, path.Ext(base))
+}
+
+// RenderedPath returns where `modelith render` writes a model file's Markdown:
+// the same path with a .yaml/.yml extension replaced by .md.
+func RenderedPath(p string) string {
+	ext := path.Ext(p)
+	if ext == ".yaml" || ext == ".yml" {
+		return strings.TrimSuffix(p, ext) + ".md"
+	}
+	return p + ".md"
 }
 
 // Enum is a named, first-class set of allowed values for an attribute. Defining
