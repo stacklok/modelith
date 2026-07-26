@@ -286,5 +286,12 @@ an error, not a shrug — and the [rendered model](./garage.modelith.md) links
 [payments model](./payments.modelith.md). One definition, in the context that
 owns it.
 
+The one thing the payments model *may* want to say is that it is on the
+receiving end of this. A model whose enums are used only by the models that
+import it collects an "enum is defined but no attribute uses it" advisory for
+each one, since the uses are in files it cannot see. `shared: true` at the top
+level retires that class of advisory — and nothing else. This one declares it,
+though its own `Payment` happens to use the enum too.
+
 Full rules, including how to name a scope explicitly when the filename won't do:
 [Imports](../06-schema-reference.md#imports).
