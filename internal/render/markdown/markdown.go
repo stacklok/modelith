@@ -5,6 +5,7 @@ package markdown
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -27,8 +28,13 @@ var (
 	backtickRunRE = regexp.MustCompile("`+")
 )
 
-// Render produces the full Markdown document for the model.
-func Render(m *model.Model) string {
+// Render produces the full Markdown document for the model. sourceDir is the
+// directory holding the model's own .yaml (imports are written relative to
+// it); outDir is the directory this Markdown is being written to (or
+// sourceDir itself, for a caller with no output file — e.g. `--stdout`). Both
+// must be absolute, or both relative to the same base, so the import links
+// built from them are well-defined; see importLinkTarget.
+func Render(m *model.Model, sourceDir, outDir string) string {
 	var b strings.Builder
 
 	b.WriteString(generatedBanner)
@@ -45,10 +51,10 @@ func Render(m *model.Model) string {
 		b.WriteString("\n\n")
 	}
 
-	renderImports(&b, m)
+	renderImports(&b, m, sourceDir, outDir)
 	renderGlossary(&b, m)
 	renderEnums(&b, m)
-	renderEntities(&b, m)
+	renderEntities(&b, m, sourceDir, outDir)
 	renderDiagram(&b, m)
 	renderInvariants(&b, m)
 	renderScenarios(&b, m)
@@ -80,7 +86,7 @@ func renderInvariants(b *strings.Builder, m *model.Model) {
 // to, because they are two different files. Labelling the link with the ".yaml"
 // path while pointing it at the ".md" told the reader they were clicking
 // through to the model source.
-func renderImports(b *strings.Builder, m *model.Model) {
+func renderImports(b *strings.Builder, m *model.Model, sourceDir, outDir string) {
 	if len(m.Imports) == 0 {
 		return
 	}
@@ -92,7 +98,7 @@ func renderImports(b *strings.Builder, m *model.Model) {
 	// link's own label is a fixed word, so it carries nothing to escape.
 	for _, imp := range m.Imports {
 		fmt.Fprintf(b, "- **%s** — %s ([rendered](%s))\n",
-			codeSpan(imp.Scope), codeSpan(imp.Path), linkTarget(model.RenderedPath(imp.Path)))
+			codeSpan(imp.Scope), codeSpan(imp.Path), linkTarget(importLinkTarget(imp.Path, sourceDir, outDir)))
 	}
 	b.WriteString("\n")
 }
@@ -100,17 +106,46 @@ func renderImports(b *strings.Builder, m *model.Model) {
 // importAnchors maps each bound scope to the rendered Markdown of the model it
 // names, for linking a qualified type. The first binding of a scope wins; a
 // second one is a lint error, and the renderer stays deterministic either way.
-func importAnchors(m *model.Model) map[string]string {
+func importAnchors(m *model.Model, sourceDir, outDir string) map[string]string {
 	if len(m.Imports) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(m.Imports))
 	for _, imp := range m.Imports {
 		if _, seen := out[imp.Scope]; !seen {
-			out[imp.Scope] = model.RenderedPath(imp.Path)
+			out[imp.Scope] = importLinkTarget(imp.Path, sourceDir, outDir)
 		}
 	}
 	return out
+}
+
+// importLinkTarget is the Markdown link destination for an import: the
+// imported model's *default* rendered path — model.RenderedPath(impPath)
+// resolved against sourceDir, i.e. where `modelith render` puts that model's
+// Markdown when it is rendered in place, the documented convention — expressed
+// relative to outDir. The renderer has no way to know if the imported model
+// was actually rendered anywhere else, so a link only resolves when it was
+// rendered at that default location.
+//
+// When outDir and sourceDir are the same directory (the common case: no -o,
+// or --stdout, both render beside the source), impPath's own rendered form is
+// already correctly relative to outDir, so it is returned unchanged rather
+// than round-tripped through Join/Rel, which would needlessly normalize away
+// a leading "./".
+func importLinkTarget(impPath, sourceDir, outDir string) string {
+	rendered := model.RenderedPath(impPath)
+	if outDir == sourceDir {
+		return rendered
+	}
+	abs := filepath.Join(sourceDir, filepath.FromSlash(rendered))
+	rel, err := filepath.Rel(outDir, abs)
+	if err != nil {
+		// sourceDir and outDir aren't comparable (e.g. different Windows
+		// volumes) — the pre-relativized path is no more wrong than any
+		// alternative, and it's better than an empty link.
+		return rendered
+	}
+	return filepath.ToSlash(rel)
 }
 
 // typeCell renders an attribute type for a table cell, linking a "scope.Name"
@@ -178,7 +213,7 @@ func renderEnums(b *strings.Builder, m *model.Model) {
 	}
 }
 
-func renderEntities(b *strings.Builder, m *model.Model) {
+func renderEntities(b *strings.Builder, m *model.Model, sourceDir, outDir string) {
 	names := m.EntityNames()
 	if len(names) == 0 {
 		return
@@ -191,7 +226,7 @@ func renderEntities(b *strings.Builder, m *model.Model) {
 			subtypes[p] = append(subtypes[p], n)
 		}
 	}
-	importTargets := importAnchors(m)
+	importTargets := importAnchors(m, sourceDir, outDir)
 	b.WriteString("## Entities\n\n")
 	for _, name := range names {
 		ent := m.Entities[name]

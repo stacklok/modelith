@@ -348,7 +348,12 @@ Rendered Markdown names each import, shows the path as written, and links
 separately to that model's rendered `.md`; a qualified type links straight to
 the item's heading there. The renderer never opens an imported file, so a link
 points at where the Markdown *would* be: render the imported model too, or the
-link dangles.
+link dangles. That location is the imported model's **default** rendered path
+— beside its own `.yaml`, per [`modelith render`](./07-cli.md) with no `-o` —
+expressed relative to wherever this Markdown is written, so `-o` a different
+directory than the source keeps the link resolving. `--stdout` has no output
+location to relativize against, so its links stay relative to the source, as
+they would from a default, beside-the-source render.
 
 The linter reports a qualified type that doesn't resolve as an **error**, while
 an *unqualified* PascalCase type that names no enum is only a **warning**. The
@@ -446,8 +451,10 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
     - a scenario `invariants_touched` or an action `preserves` that references an
       invariant id no entity or model-level invariant declares;
     - an [import](#imports) that is absolute, unreadable, not a domain model,
-      binds a scope another import already bound, or is a bare path whose
-      filename yields no valid slug;
+      binds a scope another import already bound, is a bare path whose
+      filename yields no valid slug, resolves outside the repository holding
+      this model, contains a control character, or declares a schema version
+      this modelith doesn't support;
     - a qualified attribute `type` whose scope isn't imported, or that names
       no enum in the model it resolves to.
   - **Warnings** (likely-but-not-certainly wrong):

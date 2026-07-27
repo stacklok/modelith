@@ -170,6 +170,76 @@ func TestRenderStdoutDoesNotWriteFile(t *testing.T) {
 	}
 }
 
+// TestRenderOutFlagRelativizesImportLinks pins the R2-1 fix at the CLI level:
+// `render -o <dir>/x.md` used to emit import links relative to the source
+// directory, so a link built for `-o` landed at a path that didn't exist next
+// to the file `-o` actually wrote. The output directory here (a fresh temp
+// dir) shares no ancestor with the source's temp dir short of the OS temp
+// root, so a fix that only handles a common-prefix case would still fail
+// this.
+func TestRenderOutFlagRelativizesImportLinks(t *testing.T) {
+	srcDir := t.TempDir()
+	const payments = `kind: DomainModel
+version: v1
+entities:
+  Payment:
+    definition: A payment.
+enums:
+  PaymentMethod:
+    values:
+      - {name: card, definition: A card payment.}
+`
+	paymentsYAML := writeTemp(t, srcDir, "payments.modelith.yaml", payments)
+	if _, err := run(t, "render", paymentsYAML); err != nil {
+		t.Fatalf("rendering the imported model failed: %v", err)
+	}
+
+	const main = `kind: DomainModel
+version: v1
+imports:
+  - ./payments.modelith.yaml
+entities:
+  Ticket:
+    definition: A parking ticket.
+    attributes:
+      - {name: paidWith, type: payments.PaymentMethod, description: how the fee was paid}
+`
+	mainYAML := writeTemp(t, srcDir, "main.modelith.yaml", main)
+
+	outDir := t.TempDir() // a distinct temp dir: no shared ancestor but the OS temp root.
+	target := filepath.Join(outDir, "rendered.md")
+	if _, err := run(t, "render", "-o", target, mainYAML); err != nil {
+		t.Fatalf("render -o failed: %v", err)
+	}
+	rendered, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("expected %s to be written: %v", target, err)
+	}
+
+	link := importLinkFromMarkdown(t, string(rendered))
+	resolved := filepath.Join(filepath.Dir(target), link)
+	if _, err := os.Stat(resolved); err != nil {
+		t.Fatalf("import link %q resolved to %s, which does not exist: %v\nrendered output:\n%s", link, resolved, err, rendered)
+	}
+}
+
+// importLinkFromMarkdown extracts the destination of the single "[rendered](...)"
+// link an Imports section emits, failing the test if it can't find exactly one.
+func importLinkFromMarkdown(t *testing.T, md string) string {
+	t.Helper()
+	const marker = "([rendered]("
+	start := strings.Index(md, marker)
+	if start < 0 {
+		t.Fatalf("no import link found in:\n%s", md)
+	}
+	start += len(marker)
+	end := strings.IndexByte(md[start:], ')')
+	if end < 0 {
+		t.Fatalf("unterminated import link in:\n%s", md)
+	}
+	return md[start : start+end]
+}
+
 func TestRenderInvalidFileGivesFriendlyError(t *testing.T) {
 	// Missing the required `definition`, so structural validation fails.
 	const invalid = `kind: DomainModel

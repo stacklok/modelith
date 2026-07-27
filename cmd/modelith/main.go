@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 
@@ -222,9 +223,17 @@ func renderCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rendered := markdown.Render(m)
+
+			sourceDir, err := filepath.Abs(filepath.Dir(in))
+			if err != nil {
+				return fmt.Errorf("resolving %s: %w", in, err)
+			}
 
 			if stdout {
+				// There is no output file to relativize import links against, so
+				// they stay relative to the source — the same links a default,
+				// beside-the-source render would produce.
+				rendered := markdown.Render(m, sourceDir, sourceDir)
 				_, err := fmt.Fprint(cmd.OutOrStdout(), rendered)
 				return err
 			}
@@ -233,6 +242,11 @@ func renderCmd() *cobra.Command {
 			if target == "" {
 				target = defaultOut(in)
 			}
+			outDir, err := filepath.Abs(filepath.Dir(target))
+			if err != nil {
+				return fmt.Errorf("resolving %s: %w", target, err)
+			}
+			rendered := markdown.Render(m, sourceDir, outDir)
 
 			if check {
 				existing, err := os.ReadFile(target)
@@ -262,9 +276,10 @@ func renderCmd() *cobra.Command {
 	return cmd
 }
 
-// defaultOut is where render writes when no -o is given. It is the same
-// mapping the renderer uses for its links into an imported model's Markdown, so
-// the two cannot disagree about where a model's .md lives.
+// defaultOut is where render writes when no -o is given: a model's .md beside
+// its .yaml source. It is the rendered location an import link assumes for the
+// model it names (see importLinkTarget in internal/render/markdown) — a link
+// resolves only when the imported model was, in fact, rendered here.
 func defaultOut(in string) string { return model.RenderedPath(in) }
 
 // ---- schema ----

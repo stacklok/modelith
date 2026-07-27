@@ -9,6 +9,16 @@ import (
 	"github.com/stacklok/modelith/internal/model"
 )
 
+// render calls Render with sourceDir == outDir, the default beside-the-source
+// case every test in this file exercises except the ones specifically about
+// relativizing an import link against a different output directory (see
+// TestRenderImports_LinkRelativeToOutputDir). The two directories are never
+// read from disk — Render only uses them to compute relative import links —
+// so any distinct absolute-looking path pair does the job.
+func render(m *model.Model) string {
+	return Render(m, "/src", "/src")
+}
+
 // firstDiff reports the first line where want and got differ, so a golden
 // failure points at the change instead of just saying "they differ."
 func firstDiff(want, got string) string {
@@ -45,7 +55,7 @@ func TestRenderInvariantsSection(t *testing.T) {
 			{ID: "cross-entity-rule", Statement: "Spans the `Project` and the `Policy`."},
 		},
 	}
-	got := Render(with)
+	got := render(with)
 	if !strings.Contains(got, "## Invariants\n") {
 		t.Fatalf("expected a top-level Invariants section, got:\n%s", got)
 	}
@@ -58,8 +68,8 @@ func TestRenderInvariantsSection(t *testing.T) {
 			"Project": {Definition: "A container."},
 		},
 	}
-	if strings.Contains(Render(without), "## Invariants") {
-		t.Fatalf("did not expect an Invariants section when there are none:\n%s", Render(without))
+	if strings.Contains(render(without), "## Invariants") {
+		t.Fatalf("did not expect an Invariants section when there are none:\n%s", render(without))
 	}
 }
 
@@ -76,7 +86,7 @@ func TestRenderEntity_DerivedMarker(t *testing.T) {
 			},
 		},
 	}
-	got := Render(withDerivation)
+	got := render(withDerivation)
 	if !strings.Contains(got, "**Derived:** Computed on demand from `Score` records.\n\n") {
 		t.Fatalf("expected a derivation-specific marker, got:\n%s", got)
 	}
@@ -89,7 +99,7 @@ func TestRenderEntity_DerivedMarker(t *testing.T) {
 			},
 		},
 	}
-	got = Render(withoutDerivation)
+	got = render(withoutDerivation)
 	if !strings.Contains(got, "**Derived.** Computed on demand from other state; never persisted.\n\n") {
 		t.Fatalf("expected a generic derived marker when derivation is omitted, got:\n%s", got)
 	}
@@ -99,8 +109,8 @@ func TestRenderEntity_DerivedMarker(t *testing.T) {
 			"Leaderboard": {Definition: "A ranked view over current scores."},
 		},
 	}
-	if strings.Contains(Render(notDerived), "**Derived") {
-		t.Fatalf("did not expect a derived marker on a non-derived entity:\n%s", Render(notDerived))
+	if strings.Contains(render(notDerived), "**Derived") {
+		t.Fatalf("did not expect a derived marker on a non-derived entity:\n%s", render(notDerived))
 	}
 }
 
@@ -115,7 +125,7 @@ func TestRenderEntity_SymmetricRelationship(t *testing.T) {
 			{Entity: "Node", Cardinality: "1:0..1", Role: "`Predecessor`"},
 		}},
 	}}
-	got := Render(m)
+	got := render(m)
 	if want := "- `Node` — n:n — symmetric — `Peer`\n"; !strings.Contains(got, want) {
 		t.Fatalf("expected a symmetric marker %q, got:\n%s", want, got)
 	}
@@ -140,7 +150,7 @@ func TestGoldenExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := Render(m)
+	got := render(m)
 
 	want, err := os.ReadFile(golden)
 	if err != nil {
@@ -177,7 +187,7 @@ func TestRenderImports_SectionAndLinkedTypes(t *testing.T) {
 			},
 		},
 	}
-	got := Render(m)
+	got := render(m)
 
 	for _, want := range []string{
 		"## Imports\n",
@@ -198,8 +208,73 @@ func TestRenderImports_SectionAndLinkedTypes(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(Render(&model.Model{Entities: m.Entities}), "## Imports") {
+	if strings.Contains(render(&model.Model{Entities: m.Entities}), "## Imports") {
 		t.Error("did not expect an Imports section when there are no imports")
+	}
+}
+
+// TestRenderImports_LinkRelativeToOutputDir pins the R2-1 fix: `render -o
+// <dir>/x.md` and `--stdout` used to emit import links relative to the
+// *source* directory regardless of where the output landed, so a link into
+// `outdir/payments.modelith.md` dangled — the file modelith actually wrote was
+// `payments.modelith.md` beside the source. The link target must instead be
+// the imported model's default rendered path (RenderedPath resolved against
+// sourceDir) expressed relative to outDir. The second case has sourceDir and
+// outDir share no ancestor but "/", the case an implementation that assumes a
+// common prefix gets wrong.
+func TestRenderImports_LinkRelativeToOutputDir(t *testing.T) {
+	t.Parallel()
+
+	m := &model.Model{
+		Imports: []model.Import{
+			{Scope: "payments", Path: "../payments/payments.modelith.yaml", ScopeFromPath: true},
+			{Scope: "billing", Path: "./legacy/pay-v2.modelith.yaml"},
+		},
+		Entities: map[string]model.Entity{
+			"Ticket": {
+				Definition: "A temporary entry credential.",
+				Attributes: []model.Attribute{
+					{Name: "paidWith", Type: "payments.PaymentMethod"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		name              string
+		sourceDir, outDir string
+		payments, billing string
+	}{
+		{
+			// `-o ../out/x.md`: a sibling directory sharing an ancestor
+			// ("/repo") with the source.
+			name:      "sibling output directory",
+			sourceDir: "/repo/models",
+			outDir:    "/repo/out",
+			payments:  "../payments/payments.modelith.md",
+			billing:   "../models/legacy/pay-v2.modelith.md",
+		},
+		{
+			name:      "no common ancestor beyond root",
+			sourceDir: "/src/models",
+			outDir:    "/var/output",
+			payments:  "../../src/payments/payments.modelith.md",
+			billing:   "../../src/models/legacy/pay-v2.modelith.md",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := Render(m, tc.sourceDir, tc.outDir)
+			for _, want := range []string{
+				fmt.Sprintf("- **`payments`** — `../payments/payments.modelith.yaml` ([rendered](%s))\n", tc.payments),
+				fmt.Sprintf("- **`billing`** — `./legacy/pay-v2.modelith.yaml` ([rendered](%s))\n", tc.billing),
+				fmt.Sprintf("[payments.PaymentMethod](%s#paymentmethod)", tc.payments),
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("expected %q in:\n%s", want, got)
+				}
+			}
+		})
 	}
 }
 
@@ -231,7 +306,7 @@ func TestRenderImports_HostilePathCannotEscapeItsMarkup(t *testing.T) {
 			},
 		},
 	}
-	got := Render(m)
+	got := render(m)
 
 	for _, want := range []string{
 		// The path is a code span, so nothing in it opens a tag, and the link
@@ -348,7 +423,7 @@ func TestRenderEntity_SubtypeHierarchy(t *testing.T) {
 		"Card":          {Definition: "A card.", SubtypeOf: "PaymentMethod"},
 		"BankTransfer":  {Definition: "A transfer.", SubtypeOf: "PaymentMethod"},
 	}}
-	got := Render(m)
+	got := render(m)
 	if !strings.Contains(got, "**Subtype of** `PaymentMethod`") {
 		t.Errorf("expected child to name its supertype:\n%s", got)
 	}

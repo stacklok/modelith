@@ -65,6 +65,12 @@ Renders the model to a single Markdown document with an embedded Mermaid
 | `--stdout` | `false` | Write to stdout instead of a file. |
 | `--check` | `false` | Verify the committed output is up to date; non-zero exit on drift. |
 
+If the model has [`imports`](./06-schema-reference.md#imports), the rendered
+links to them are relative to wherever `-o` writes — `-o` a different
+directory than the source and they still resolve, as long as the imported
+model is rendered to *its* default location too. `--stdout` has no output file
+to relativize against, so its links stay relative to the source.
+
 The committed Markdown is the day-to-day read. `--check` is the CI gate that
 keeps it honest:
 
