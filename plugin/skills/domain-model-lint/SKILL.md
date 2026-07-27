@@ -50,13 +50,14 @@ the flag.
   that aren't inverses; reciprocal declarations that both claim
   `ownership: owned`; an `imports` entry that's absolute, unreadable, not a
   domain model, binds a scope another entry already bound, resolves outside
-  the repository holding this model, or is a bare path whose filename yields
-  no valid scope slug; an attribute `type` containing a dot that isn't a
-  well-formed `scope.Name` (a dot is always reserved for a cross-model
-  reference — `decimal(10.2)` and `google.protobuf.Timestamp` are errors, not
-  primitives); a `scope.Name` type whose scope no import binds, or that names
-  no enum in the model it resolves to. Warnings: a backticked term resolves to
-  no entity, role, or actor; an action `actor` that's neither an entity nor a
+  the repository holding this model, is a bare path whose filename yields no
+  valid scope slug, has a path containing a control character, or declares a
+  schema version this modelith doesn't support; an attribute `type` containing
+  a dot that isn't a well-formed `scope.Name` (a dot is always reserved for a
+  cross-model reference — `decimal(10.2)` and `google.protobuf.Timestamp` are
+  errors, not primitives); a `scope.Name` type whose scope no import binds, or
+  that names no enum in the model it resolves to. Warnings: a backticked term
+  resolves to no entity, role, or actor; an action `actor` that's neither an entity nor a
   glossary term; a PascalCase attribute `type` that names no defined enum —
   usually a typo or a concept that was never named; a relationship `role`
   written as prose, which belongs in `note`; an ambiguous reciprocal pairing,
