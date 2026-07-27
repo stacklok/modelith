@@ -838,6 +838,40 @@ func TestADR_0014_ProseRendersHTMLAsText(t *testing.T) {
 	}
 }
 
+// TestRender_UnnormalisedProseDoesNotPanic pins the guard in parseSource.
+// goldmark measures a line's indent in columns and its length in bytes, so a
+// final line a tab can outrun is taken for a blank one and the fenced-code-block
+// parser indexes it at the -1 that marks one. Every input here lints clean and
+// crashed `modelith render` with a Go stack trace before the trailing newline
+// went in; the first is upstream yuin/goldmark#556's own repro, which v1.8.4
+// still panics on despite carrying the fix for it.
+func TestRender_UnnormalisedProseDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ name, payload string }{
+		{"upstream 556 repro", "*\n\t* \t~"},
+		{"blockquote tab backtick", "A ticket.\n\n> \t`"},
+		{"bare blockquote tab backtick", "> \t`"},
+		{"blockquote tab tilde", "> \t~"},
+		{"tab before a fence", "Shape:\n\n> \t```"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := &model.Model{
+				Description: tc.payload,
+				Entities: map[string]model.Entity{
+					"Ticket": {Definition: tc.payload},
+				},
+				Scenarios: []model.Scenario{{Name: "Pay", Description: tc.payload}},
+			}
+			if html := rawHTML(t, render(m)); len(html) > 0 {
+				t.Errorf("raw HTML survived the render: %q", html)
+			}
+		})
+	}
+}
+
 // TestRenderCodeSpans_HostileNamesStayInsideTheirSpan is the regression for
 // issue #35: a backtick in an unconstrained field closed its code span early
 // and let the remainder land as live Markdown. Every one of these fields is a

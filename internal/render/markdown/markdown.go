@@ -532,12 +532,14 @@ func escapeProse(s string, blockContext bool) string {
 // rather than text on the page, so escaping it costs nothing and keeps an
 // unclosed fence from carrying a tag on its opening line.
 func literalRanges(s string, blockContext bool) []byteRange {
-	src := []byte(s)
+	src := parseSource(s)
 	var out []byteRange
 	appendSegments := func(segs *text.Segments) {
 		for i := 0; i < segs.Len(); i++ {
 			seg := segs.At(i)
-			out = append(out, byteRange{seg.Start, seg.Stop})
+			if stop := min(seg.Stop, len(s)); seg.Start < stop {
+				out = append(out, byteRange{seg.Start, stop})
+			}
 		}
 	}
 	// Walk never returns an error: the callback below returns none.
@@ -575,6 +577,25 @@ func literalRanges(s string, blockContext bool) []byteRange {
 		prev = r.stop
 	}
 	return merged
+}
+
+// parseSource returns the bytes to hand the parser for s. The trailing newline
+// is a workaround, not a nicety. goldmark decides whether a line is blank by
+// comparing an indent measured in *columns* against the line's length in
+// *bytes*, so a final line short enough for a tab to outrun it — "> \t`" — is
+// called blank, and the fenced-code-block parser then indexes it at the -1 that
+// marks one. That panics `modelith render` on a model that lints clean.
+//
+// A line ending keeps the comparison honest and costs nothing: a document is
+// defined to end with one, and appending it moves no offset inside s. Upstream
+// yuin/goldmark#556 fixed one path into the same -1 and v1.8.4 carries that
+// fix; this input reaches it by another, and #556's own repro still panics on
+// v1.8.4. TestRender_UnnormalisedProseDoesNotPanic guards it.
+func parseSource(s string) []byte {
+	if !strings.HasSuffix(s, "\n") {
+		s += "\n"
+	}
+	return []byte(s)
 }
 
 func escapeMarkup(b *strings.Builder, s string) {
