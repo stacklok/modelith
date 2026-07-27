@@ -107,6 +107,29 @@ func TestParseSource(t *testing.T) {
 			},
 		},
 		{
+			// A host is case-insensitive. Rejecting this one produced the
+			// self-contradictory "only from github.com, and … is on GitHub.com".
+			name: "the host is matched without regard to case or a www prefix",
+			raw:  "https://WWW.GitHub.com/acme/billing/blob/main/docs/payments.modelith.yaml",
+			want: Source{
+				Origin: "https://github.com/acme/billing", Owner: "acme", Repo: "billing",
+				Ref: "main", Path: "docs/payments.modelith.yaml",
+			},
+		},
+		{
+			// url.Parse does not remove dot segments, and escapePath cannot
+			// neutralise a segment that *is* a traversal — it would reach the
+			// API endpoint intact and leave the contents namespace.
+			name:    "a traversal segment is not an address github.com serves",
+			raw:     "https://github.com/acme/billing/blob/main/../../../user/repos",
+			wantErr: `has a ".." path segment`,
+		},
+		{
+			name:    "an empty segment is rejected too",
+			raw:     "https://github.com/acme/billing/blob/main//payments.modelith.yaml",
+			wantErr: `has a "" path segment`,
+		},
+		{
 			name:    "another host asks for an issue rather than guessing",
 			raw:     "https://gitlab.com/acme/billing/-/blob/main/payments.modelith.yaml",
 			wantErr: "github.com/stacklok/modelith/issues",
@@ -293,7 +316,22 @@ func TestImport_Rejections(t *testing.T) {
 			name:    "a file that is not a domain model",
 			runner:  &fakeRunner{content: "kind: SomethingElse\nversion: v1\n", sha: sha},
 			url:     blobURL,
-			wantErr: "not a domain model",
+			wantErr: `it declares kind "SomethingElse"`,
+		},
+		{
+			name:    "a file with no kind at all",
+			runner:  &fakeRunner{content: "title: Payments\n", sha: sha},
+			url:     blobURL,
+			wantErr: "it declares no kind",
+		},
+		{
+			// A model authored by a newer modelith parses strictly and fails.
+			// Collapsing that into "is not a domain model" sent the user to
+			// check the URL, which is not what went wrong.
+			name:    "a model this build cannot read says what the parser said",
+			runner:  &fakeRunner{content: upstream + "futureField: yes\n", sha: sha},
+			url:     blobURL,
+			wantErr: "futureField",
 		},
 		{
 			name:    "a path with no commits at that ref",
@@ -306,6 +344,15 @@ func TestImport_Rejections(t *testing.T) {
 			runner:  &fakeRunner{content: upstream, sha: sha, fail: "/contents/"},
 			url:     blobURL,
 			wantErr: "HTTP 404",
+		},
+		{
+			// The likeliest reason a fetch 404s on a URL that parsed is that
+			// the ref has a slash in it and the path was split at the first
+			// segment. Saying so is the difference between a dead end and a fix.
+			name:    "a refused fetch says how the URL was split",
+			runner:  &fakeRunner{content: upstream, sha: sha, fail: "/contents/"},
+			url:     blobURL,
+			wantErr: `read "main" as the ref and "docs/payments.modelith.yaml" as the path`,
 		},
 	}
 	for _, tc := range cases {
@@ -322,6 +369,61 @@ func TestImport_Rejections(t *testing.T) {
 			}
 			if len(entries) != 0 {
 				t.Errorf("a rejected import left %d file(s) behind", len(entries))
+			}
+		})
+	}
+}
+
+// TestImport_RefusesToOverwriteWhatItDidNotWrite pins the guard on the
+// destination. The filename comes from the origin, so it can land on a file this
+// repository already has — and overwriting a model this repository wrote loses
+// work no re-fetch can recover, which the earlier os.Stat-only check did
+// silently, reporting it as an ordinary "replaced".
+func TestImport_RefusesToOverwriteWhatItDidNotWrite(t *testing.T) {
+	t.Parallel()
+
+	const own = "kind: DomainModel\nversion: v1\ntitle: Ours\n"
+
+	cases := []struct {
+		name     string
+		existing string
+		wantErr  string
+	}{
+		{
+			name:     "a model this repository owns",
+			existing: own,
+			wantErr:  "carries no provenance header",
+		},
+		{
+			name: "a copy of a different model with the same filename",
+			existing: "# modelith-vendored: " + provenance.Banner + "\n" +
+				"# modelith-fetch: git\n" +
+				"# modelith-origin: https://github.com/other/repo\n" +
+				"# modelith-path: docs/payments.modelith.yaml\n" +
+				"# modelith-ref: main\n# modelith-commit: abc\n" +
+				"# modelith-imported: 2026-07-27\n" +
+				"# modelith-digest: " + provenance.Digest([]byte(own)) + "\n" + own,
+			wantErr: "is a vendored copy of https://github.com/other/repo",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			target := filepath.Join(dir, "payments.modelith.yaml")
+			if err := os.WriteFile(target, []byte(tc.existing), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := importInto(t, dir, &fakeRunner{content: upstream, sha: sha}, blobURL)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("want an error containing %q, got %v", tc.wantErr, err)
+			}
+			got, readErr := os.ReadFile(target)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(got) != tc.existing {
+				t.Errorf("the refused import wrote over the file anyway:\n%s", got)
 			}
 		})
 	}

@@ -388,7 +388,10 @@ func TestDepsImportOutput(t *testing.T) {
 	t.Run("a leaf model", func(t *testing.T) {
 		var out, errOut bytes.Buffer
 		printImportResult(&out, &errOut, res)
-		for _, want := range []string{"wrote docs/payments.modelith.yaml at 4f2c1e9", "imports:", "- ./payments.modelith.yaml"} {
+		// The entry names where the copy actually landed. Printing the bare
+		// basename told a user who passed a directory to paste a path that
+		// resolves to nothing.
+		for _, want := range []string{"wrote docs/payments.modelith.yaml at 4f2c1e9", "imports:", "- ./docs/payments.modelith.yaml"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("stdout does not contain %q:\n%s", want, out.String())
 			}
@@ -414,6 +417,16 @@ func TestDepsImportOutput(t *testing.T) {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("stdout does not contain %q:\n%s", want, out.String())
 			}
+		}
+	})
+
+	t.Run("a copy in the working directory", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		here := *res
+		here.Path = "payments.modelith.yaml"
+		printImportResult(&out, &errOut, &here)
+		if !strings.Contains(out.String(), "- ./payments.modelith.yaml") {
+			t.Errorf("stdout does not contain the entry:\n%s", out.String())
 		}
 	})
 

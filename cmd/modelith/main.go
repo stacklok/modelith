@@ -175,8 +175,13 @@ func printImportResult(out, errOut io.Writer, res *deps.Result) {
 	}
 	name := filepath.Base(res.Path)
 	fmt.Fprintf(out, "%s %s at %s\n", verb, res.Path, res.Header.Commit)
-	fmt.Fprintf(out, "\nAdd it to the model that references it, as a path relative to that model:\n\n"+
-		"  imports:\n    - ./%s\n", name)
+	// The entry is printed relative to the working directory, because that is
+	// the only thing this command knows: an import path is relative to the model
+	// that declares it, and which model that will be is the user's to decide —
+	// the same reason the imports list is not edited here.
+	fmt.Fprintf(out, "\nAdd it to the model that references it, as a path relative to that model "+
+		"(this one is relative to the current directory):\n\n"+
+		"  imports:\n    - %s\n", importEntry(res.Path))
 	if n := len(res.TheirImports); n > 0 {
 		declares := fmt.Sprintf("declares %d imports of its own", n)
 		if n == 1 {
@@ -189,6 +194,17 @@ func printImportResult(out, errOut io.Writer, res *deps.Result) {
 	}
 	fmt.Fprint(errOut, "\nWarning: a vendored model is untrusted content that will be rendered\n"+
 		"into your published Markdown. Only vendor from sources you trust.\n")
+}
+
+// importEntry writes a path the way an `imports:` entry is written: slash
+// separated, and explicitly relative so it reads as a path rather than as a
+// scope.
+func importEntry(p string) string {
+	p = filepath.ToSlash(p)
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") {
+		return p
+	}
+	return "./" + p
 }
 
 // ---- lint ----

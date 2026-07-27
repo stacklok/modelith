@@ -107,11 +107,18 @@ modelith deps import https://github.com/acme/billing/blob/main/docs/payments.mod
 |---|---|
 | `<url>` | The address of the file as it appears in a browser on github.com. |
 | `[dir]` | Destination **directory**, defaulting to `.`. The filename always comes from the origin. |
-| `--ref` | Ref to fetch, overriding the one in the URL. A tag pins the copy; also how you disambiguate a branch name containing a slash. |
+| `--ref` | Ref to fetch, overriding the one in the URL. A tag pins the copy; naming a branch whose name contains a slash is also how you tell modelith where the ref ends and the path begins. |
+
+A browse URL gives no way to tell a slashed ref from the path after it, so
+modelith splits at the first segment. `--ref` fixes that split only when it
+names the ref that is *in* the URL — it cannot both pin a different ref and
+re-split the path. To pin, open the file on the ref you want and import that
+URL. When a fetch fails, the error says how the URL was split.
 
 Fetching is delegated to [`gh`](https://cli.github.com), which must be installed
 and authenticated. The command writes the file and prints the `imports:` entry
-to add — it does not edit your model.
+to add — it does not edit your model. It refuses to overwrite a file at the
+destination that is not an earlier copy of the same model.
 
 See [Vendoring a model from another
 repository](./10-vendoring.md) for what the header records, how a vendored file

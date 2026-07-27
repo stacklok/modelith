@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/exec"
@@ -38,7 +39,10 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 	// what a transport seam is. The command is the literal "gh" at both call
 	// sites; the arguments are literals plus an endpoint assembled from a URL
 	// that ParseSource has already validated, with each path segment and query
-	// value escaped. Nothing here comes from a model file, and there is no
+	// value escaped and traversal segments rejected outright (escaping a
+	// segment cannot neutralise a segment that *is* a traversal, so ParseSource
+	// refuses those rather than passing them on). Nothing here comes from a
+	// model file, and there is no
 	// shell: exec passes an argv array, so a metacharacter is a byte in an
 	// argument rather than syntax (ADR-0010).
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -69,14 +73,18 @@ type Source struct {
 
 // ParseSource reads a GitHub blob URL — the address of the file as it appears
 // in a browser — into its parts. A non-empty ref overrides the one in the URL,
-// which is also how a branch whose name contains a slash is disambiguated from
-// the path that follows it.
+// and when it is the ref the URL names, it is also what disambiguates a branch
+// whose name contains a slash from the path that follows it. It cannot do both
+// at once: overriding with a *different* ref leaves the split to be taken at the
+// first segment, which splitHint explains when the fetch that follows fails.
 func ParseSource(raw, ref string) (Source, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return Source{}, fmt.Errorf("%q is not a URL: %w", raw, err)
 	}
-	if u.Host != "github.com" {
+	// A host is case-insensitive, and a browser hands back the "www." form as
+	// readily as the bare one; neither is a different site.
+	if host := strings.TrimPrefix(strings.ToLower(u.Host), "www."); host != "github.com" {
 		return Source{}, fmt.Errorf(
 			"modelith can currently fetch only from github.com, and %q is on %q. Support for other hosts is not written yet because nobody has needed it — if you do, please open an issue at %s saying where your models live",
 			raw, u.Host, issuesURL)
@@ -88,6 +96,19 @@ func ParseSource(raw, ref string) (Source, error) {
 		return Source{}, fmt.Errorf(
 			"%q is not a GitHub file URL — it should look like https://github.com/<owner>/<repo>/blob/<ref>/<path to the .modelith.yaml>, which is the address you get by opening the file on github.com",
 			raw)
+	}
+	// A dot segment or an empty one is not part of any address github.com
+	// serves, and url.Parse does not remove one. It has to be rejected here
+	// rather than escaped later: escapePath escapes the characters within a
+	// segment, which leaves a segment that *is* a traversal exactly as it was,
+	// and the endpoint fetchContent builds would then leave the repository's
+	// contents namespace.
+	for _, p := range parts {
+		if p == "" || p == "." || p == ".." {
+			return Source{}, fmt.Errorf(
+				"%q has a %q path segment, which is not part of a file's address on github.com — copy the address bar from the file's page rather than assembling the URL by hand",
+				raw, p)
+		}
 	}
 	src := Source{
 		Owner:  parts[0],
@@ -163,7 +184,7 @@ func Import(ctx context.Context, opts Options) (*Result, error) {
 
 	content, err := fetchContent(ctx, runner, src)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w%s", err, splitHint(src))
 	}
 	if provenance.Present(content) {
 		return nil, fmt.Errorf(
@@ -171,8 +192,17 @@ func Import(ctx context.Context, opts Options) (*Result, error) {
 			opts.URL)
 	}
 	m, err := model.Parse(content)
-	if err != nil || m.Kind != "DomainModel" {
-		return nil, fmt.Errorf("%s is not a domain model — check that the URL names a *.modelith.yaml file", opts.URL)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%s did not parse as a domain model — check that the URL names a *.modelith.yaml file, and that this modelith is new enough to read it: %w",
+			opts.URL, err)
+	}
+	if m.Kind != "DomainModel" {
+		declares := fmt.Sprintf("declares kind %q", m.Kind)
+		if m.Kind == "" {
+			declares = "declares no kind"
+		}
+		return nil, fmt.Errorf("%s is not a domain model — it %s, not \"DomainModel\"", opts.URL, declares)
 	}
 
 	commit, err := fetchCommit(ctx, runner, src)
@@ -192,8 +222,10 @@ func Import(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	target := filepath.Join(opts.Dir, path.Base(src.Path))
-	_, statErr := os.Stat(target)
-	replaced := statErr == nil
+	replaced, err := guardTarget(target, src)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.WriteFile(target, provenance.Stamp(content, h), 0o644); err != nil {
 		return nil, fmt.Errorf("writing %s: %w", target, err)
 	}
@@ -203,6 +235,54 @@ func Import(ctx context.Context, opts Options) (*Result, error) {
 		res.TheirImports = append(res.TheirImports, imp.Path)
 	}
 	return res, nil
+}
+
+// guardTarget decides whether writing to target is safe, and reports whether an
+// existing copy is being replaced.
+//
+// The destination filename comes from the origin, so it can collide with a file
+// this repository already has: a model of its own, or a copy of a different
+// model that happens to share a basename. Import refuses to fetch a file that is
+// already somebody else's copy; the same care is owed to what it writes over,
+// because a model this repository wrote is not recoverable by fetching again.
+func guardTarget(target string, src Source) (replaced bool, err error) {
+	existing, readErr := os.ReadFile(target)
+	if errors.Is(readErr, fs.ErrNotExist) {
+		return false, nil
+	}
+	if readErr != nil {
+		return false, fmt.Errorf("reading %s: %w", target, readErr)
+	}
+	if !provenance.Present(existing) {
+		return false, fmt.Errorf(
+			"%s already exists and carries no provenance header, so it is a model this repository owns rather than a copy of one — importing would overwrite it. Import into a different directory, or move that file aside first",
+			target)
+	}
+	// A header too malformed to name where it came from is still a vendored
+	// copy, and replacing it is how it gets repaired; only a header that names
+	// a *different* model blocks the write.
+	h, _ := provenance.Parse(existing)
+	if h.Origin != "" && h.Path != "" && (h.Origin != src.Origin || h.Path != src.Path) {
+		return false, fmt.Errorf(
+			"%s is a vendored copy of %s/%s, not of %s/%s — two different models share that filename. Import into a different directory so both can live here",
+			target, h.Origin, h.Path, src.Origin, src.Path)
+	}
+	return true, nil
+}
+
+// splitHint explains the one way ParseSource can be wrong about a URL it
+// accepted. A browse URL gives no way to tell where a ref containing a slash
+// ends and the path begins, so the split is taken at the first segment; a failed
+// fetch is where that guess surfaces, as a 404 that looks like the file is
+// simply not there. A single-segment path had nothing to lose to the ref, so it
+// gets no hint.
+func splitHint(src Source) string {
+	if !strings.Contains(src.Path, "/") {
+		return ""
+	}
+	return fmt.Sprintf(
+		"\n\nmodelith read %q as the ref and %q as the path. If the ref has a slash in it that split is wrong: pass the whole ref to --ref, or — if --ref is already pinning a different ref, which cannot re-split the path — open the file on the ref you want and import that URL instead",
+		src.Ref, src.Path)
 }
 
 // fetchContent returns the file's bytes. The raw media type asks the API for

@@ -54,11 +54,14 @@ never has one, and never meets any of this.
 
 ```yaml
 imports:
-  - ./payments.modelith.yaml
+  - ./docs/payments.modelith.yaml
 ```
 
-The path is relative to the model doing the importing, exactly like any other
-import. Until you add that line, the copy is an inert file that nothing reads.
+The printed path is relative to the directory you ran the command in, because
+that is the only thing `deps import` knows. An import path is relative to the
+model that *declares* it, so if that model does not sit beside your working
+directory, adjust it — exactly like any other import. Until you add that line,
+the copy is an inert file that nothing reads.
 
 That second step is deliberate. A vendored model is content someone else wrote
 that will be rendered into *your* published Markdown, so `deps import` warns you
@@ -100,6 +103,20 @@ left it stale.
 The one thing `--check` will not do is fail over a vendored model this modelith
 cannot render at all — one written against a newer schema version, say. It says
 it skipped it and moves on; `modelith lint` is where that is reported, once.
+
+## What it will not overwrite
+
+The filename comes from the origin, so a copy can land on a file you already
+have. `deps import` refuses two cases rather than clobbering them:
+
+- **A model you wrote.** No provenance header means the file is yours, and no
+  re-fetch could bring it back. Import into a different directory, or move the
+  file aside first.
+- **A copy of a *different* model with the same basename.** Two `payments.modelith.yaml`
+  files from two repositories cannot share a directory; give them separate ones.
+
+Re-importing over an existing copy of the *same* model is the ordinary refresh,
+and that goes through — it reports `replaced` rather than `wrote`.
 
 ## Keeping the copy honest
 
