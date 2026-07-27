@@ -278,6 +278,52 @@ func TestRenderImports_LinkRelativeToOutputDir(t *testing.T) {
 	}
 }
 
+// TestRenderImports_AbsolutePathIsNotRelativized pins that an absolute import
+// path is rendered unchanged rather than joined against sourceDir. An
+// absolute path is a lint error (imports must be relative), but render only
+// runs structural validation, so this is reachable. Before the fix,
+// importLinkTarget joined it against sourceDir whenever outDir differed from
+// sourceDir, silently re-rooting it under sourceDir and producing a
+// different, misleading link than the same model rendered with no -o.
+func TestRenderImports_AbsolutePathIsNotRelativized(t *testing.T) {
+	t.Parallel()
+
+	m := &model.Model{
+		Imports: []model.Import{
+			{Scope: "payments", Path: "/etc/payments.modelith.yaml"},
+		},
+		Entities: map[string]model.Entity{
+			"Ticket": {
+				Definition: "A parking ticket.",
+				Attributes: []model.Attribute{
+					{Name: "paidWith", Type: "payments.PaymentMethod"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		name              string
+		sourceDir, outDir string
+	}{
+		{name: "default, no -o", sourceDir: "/repo/models", outDir: "/repo/models"},
+		{name: "-o into a sibling directory", sourceDir: "/repo/models", outDir: "/repo/out"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := Render(m, tc.sourceDir, tc.outDir)
+			for _, want := range []string{
+				"- **`payments`** — `/etc/payments.modelith.yaml` ([rendered](/etc/payments.modelith.md))\n",
+				"[payments.PaymentMethod](/etc/payments.modelith.md#paymentmethod)",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("expected %q in:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
 // TestRenderImports_HostilePathCannotEscapeItsMarkup pins that an import path —
 // author-supplied text that reaches a published page — is escaped for the exact
 // position it lands in. A path is not validated by the schema beyond a minimum

@@ -132,9 +132,16 @@ func importAnchors(m *model.Model, sourceDir, outDir string) map[string]string {
 // already correctly relative to outDir, so it is returned unchanged rather
 // than round-tripped through Join/Rel, which would needlessly normalize away
 // a leading "./".
+//
+// An absolute impPath is a lint error (imports must be relative), but render
+// only runs structural validation, so one can still reach here. Joining it
+// against sourceDir would silently re-root it as if it were relative,
+// producing a different, misleading link under -o than the one produced with
+// no -o. Returning it unchanged keeps both cases consistent with each other
+// and matches what the model actually declared.
 func importLinkTarget(impPath, sourceDir, outDir string) string {
 	rendered := model.RenderedPath(impPath)
-	if outDir == sourceDir {
+	if outDir == sourceDir || filepath.IsAbs(rendered) {
 		return rendered
 	}
 	abs := filepath.Join(sourceDir, filepath.FromSlash(rendered))
