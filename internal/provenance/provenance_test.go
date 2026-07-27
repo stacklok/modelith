@@ -42,6 +42,7 @@ func TestPresent(t *testing.T) {
 		{"an ordinary comment that only looks like one", "#modelith-fetch: git\nkind: DomainModel\n", false},
 		{"an indented provenance line is an ordinary comment", "  # modelith-fetch: git\nkind: DomainModel\n", false},
 		{"a broken header is still a header", "# modelith-nonsense: x\nkind: DomainModel\n", true},
+		{"a provenance line below the model content is an ordinary comment", plain + "# modelith-fetch: git\n", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -153,8 +154,8 @@ func TestParse_Problems(t *testing.T) {
 		},
 		{
 			name:     "a provenance line below the model content is misplaced",
-			src:      plain + "# modelith-fetch: git\n",
-			wantLine: 5,
+			src:      "# modelith-fetch: git\n" + plain + "# modelith-origin: https://github.com/stacklok/some-repo\n",
+			wantLine: 6,
 			contains: "below the leading comment block",
 		},
 	}
@@ -256,6 +257,24 @@ func TestDigest_IgnoresEveryHeaderChange(t *testing.T) {
 		if got := Digest([]byte(src)); got != base {
 			t.Errorf("rewriting %q moved the digest to %s", key, got)
 		}
+	}
+}
+
+// TestDigest_CoversALineBelowTheHeader pins the other half of the strip rule:
+// only the leading comment block is header, so a "# modelith-" line anywhere
+// below it is content the digest covers. Stripping it there would make an edit
+// that adds or removes one invisible to drift detection — and would make a model
+// this repository owns, which happened to carry such a comment, read as
+// somebody else's copy.
+func TestDigest_CoversALineBelowTheHeader(t *testing.T) {
+	t.Parallel()
+
+	added := vendored + "# modelith-fetch: git\n"
+	if Digest([]byte(added)) == Digest([]byte(vendored)) {
+		t.Error("a provenance-looking line added below the model left the digest unchanged")
+	}
+	if !strings.Contains(string(Strip([]byte(added))), "# modelith-fetch: git") {
+		t.Error("Strip removed a line below the leading comment block")
 	}
 }
 

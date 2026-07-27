@@ -13,11 +13,12 @@ import (
 
 // LinePrefix begins every provenance line.
 //
-// A line counts only when it starts at column zero. An indented "# modelith-"
-// comment is an ordinary comment: it is neither parsed nor stripped, so the
-// bytes Parse reads and the bytes Digest covers can never disagree about which
-// lines are header. That single rule is the whole contract — the digest is
-// defined by the strip (ADR-0015).
+// A line counts only when it starts at column zero and sits in the leading
+// comment block. An indented "# modelith-" comment, or one below the first line
+// of model content, is an ordinary comment: it is neither parsed nor stripped,
+// so the bytes Parse reads and the bytes Digest covers can never disagree about
+// which lines are header. That single rule is the whole contract — the digest
+// is defined by the strip (ADR-0015).
 const LinePrefix = "# modelith-"
 
 // lineRE matches one provenance line and splits it into key and value. The
@@ -109,12 +110,20 @@ type Problem struct {
 // this repo's own work would bury the typo under a flood of completeness gaps
 // about a document nobody here controls.
 func Present(src []byte) bool {
-	for _, line := range strings.Split(string(src), "\n") {
+	return headerLines(strings.Split(string(src), "\n")) > 0
+}
+
+// headerLines counts the provenance lines in the leading comment block, which
+// are the only lines that are header at all — the rule Parse, Strip, and
+// Present all read from, so none of them can disagree with the others.
+func headerLines(lines []string) int {
+	n := 0
+	for _, line := range lines[:leadingCommentBlock(lines)] {
 		if lineRE.MatchString(line) {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 // Parse reads the provenance header from src. It returns a nil Header when src
@@ -140,7 +149,7 @@ func Parse(src []byte) (*Header, []Problem) {
 		num, key, value := i+1, m[1], strings.TrimSpace(m[2])
 		if i >= lead {
 			problems = append(problems, Problem{num, fmt.Sprintf(
-				"provenance line %q is below the leading comment block — the whole header belongs at the top of the file, before any model content",
+				"provenance line %q is below the leading comment block, so it was read as an ordinary comment rather than as header — the whole header belongs at the top of the file, before any model content",
 				LinePrefix+key)})
 			continue
 		}
@@ -209,13 +218,16 @@ func (h *Header) Verify(src []byte) (ok bool, got string) {
 	return got == h.Digest, got
 }
 
-// Strip returns src with every provenance line removed, which is the content
-// the digest covers.
+// Strip returns src with its provenance lines removed, which is the content the
+// digest covers. Only the leading comment block is stripped: a "# modelith-"
+// line below it is model content's neighbour, not header, and Parse reports it
+// as misplaced rather than reading it (see LinePrefix).
 func Strip(src []byte) []byte {
 	lines := strings.Split(string(src), "\n")
+	lead := leadingCommentBlock(lines)
 	kept := lines[:0]
-	for _, line := range lines {
-		if lineRE.MatchString(line) {
+	for i, line := range lines {
+		if i < lead && lineRE.MatchString(line) {
 			continue
 		}
 		kept = append(kept, line)
