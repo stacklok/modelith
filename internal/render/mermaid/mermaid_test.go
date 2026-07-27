@@ -600,22 +600,22 @@ func TestERDedupesSemanticallyEqualInverses(t *testing.T) {
 	}
 }
 
-// TestERRole_HostileCharacters pins current output for a role that packs
-// every hostile character sanitize knows about (backticks, quotes, brackets, a
-// literal newline) alongside characters it does NOT neutralize: '<', '>', and
-// '%%'. This golden pins the CURRENT (buggy) behavior on purpose, not the
-// desired one: fixing issue #29 must update this golden as part of that fix,
-// not treat the diff as a regression. This test pins only the generated `.mmd`
-// source text produced by ER() — it does not verify how a Mermaid renderer
-// interprets that text.
+// TestERRole_HostileCharacters pins the output for a role that packs every
+// hostile character sanitize knows about — backticks, quotes, brackets, a
+// literal newline, '<', '>', and '%%'.
 //
-// The role also embeds a `%%{init: ...}%%`-shaped substring. Separately, a
-// real render of that shape through mmdc was confirmed to parse successfully
-// while silently changing the whole diagram's theme and dropping this edge's
-// label text — a more severe manifestation of #29 than plain character
-// passthrough into the label. This golden pins that the substring reaches the
-// generated source unescaped; it does not itself exercise or assert the
-// renderer-level effect, which was only checked by hand outside this test.
+// This golden previously pinned the pre-#29 behavior on purpose, with '<', '>'
+// and '%%' reaching the diagram source untouched. The fix for #29 replaced it:
+// the angle brackets are now character references and the doubled percent signs
+// are collapsed to single ones, which is what the diff against the old golden
+// shows.
+//
+// The test asserts the generated `.mmd` source only. What a Mermaid renderer
+// does with that source was checked separately against mmdc 11: with the
+// doubled signs, the `%%{init: ...}%%` substring parsed as a configuration
+// directive, restyled the whole diagram and swallowed the label; with single
+// signs the diagram keeps its default theme and the text stays in the label.
+// `task mermaid-check` feeds this file to the real parser.
 func TestERRole_HostileCharacters(t *testing.T) {
 	t.Parallel()
 	role := "he said \"hi\" [bracket] `tick` {brace} <angle> #hash %%pct %%{init: {'theme':'forest'}}%%\nsecond line"
@@ -672,4 +672,51 @@ func TestER_UndeclaredRelationshipTarget(t *testing.T) {
 		}},
 	}}
 	assertGolden(t, m, "testdata/undeclared_target.golden.mmd")
+}
+
+// TestSanitize_NeutralizesMermaidMetacharacters is the regression for issue
+// #29, case by case. A directive needs doubled percent signs and a tag needs a
+// raw angle bracket, so neutralizing exactly those is what closes the gap while
+// leaving an ordinary role — including a lone "%" and a lone "&" — readable.
+func TestSanitize_NeutralizesMermaidMetacharacters(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ name, in, want string }{
+		{"ordinary role", "owns", "owns"},
+		{"directive", "%%{init:{'theme':'dark'}}%%", "%{init:{'theme':'dark'}}%"},
+		{"comment", "before %% after", "before % after"},
+		{"longer run", "%%%%x", "%x"},
+		{"lone percent survives", "50% full", "50% full"},
+		{"angle brackets", "<angle>", "&lt;angle&gt;"},
+		{"tag", "<img src=q onerror=alert(1)>", "&lt;img src=q onerror=alert(1)&gt;"},
+		{"ampersand encoded", "R&D", "R&amp;D"},
+		// The ampersand is escaped before the angle brackets, so a reference the
+		// author wrote is not fused with one this function introduced: mermaid
+		// decodes it back to the four characters "&lt;".
+		{"pre-escaped reference", "&lt;x&gt;", "&amp;lt;x&amp;gt;"},
+		{"backticks and quotes still go", "`a` \"b\" [c]", "a 'b' (c)"},
+		{"newlines still collapse", "a\nb\tc", "a b c"},
+	}
+	for _, tc := range cases {
+		if got := sanitize(tc.in); got != tc.want {
+			t.Errorf("%s: sanitize(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestERSelfRow_HostileRole guards that a self-referential relationship, which
+// renders as a row inside the entity block rather than as an edge, goes through
+// the same sanitizing. It is a second call site (selfComment), and #29's gap
+// was equally reachable from it.
+func TestERSelfRow_HostileRole(t *testing.T) {
+	t.Parallel()
+	m := &model.Model{Entities: map[string]model.Entity{
+		"Node": {Definition: "n", Relationships: []model.Relationship{
+			{Entity: "Node", Cardinality: "n:n", Role: "%%{init:{'theme':'dark'}}%% <angle>"},
+		}},
+	}}
+	got := ER(m)
+	if want := `Node self "n:n — %{init:{'theme':'dark'}}% &lt;angle&gt;"`; !strings.Contains(got, want) {
+		t.Errorf("expected %q in:\n%s", want, got)
+	}
 }

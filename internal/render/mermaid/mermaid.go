@@ -5,6 +5,7 @@ package mermaid
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -240,19 +241,42 @@ func relationshipLabel(rel model.Relationship) string {
 	return sanitize(rel.Role)
 }
 
+// percentRunRE finds the doubled percent signs a Mermaid directive or comment
+// is built from; see sanitize.
+var percentRunRE = regexp.MustCompile(`%{2,}`)
+
 // sanitize strips or replaces characters that would break a quoted Mermaid
-// label. Square brackets are replaced with parentheses because Mermaid uses
-// them for node/attribute syntax; backticks, quotes and backslashes are
-// neutralized and newlines collapsed. Dropping the backslash also keeps the %q
-// the callers emit with from doubling it into a visible "\\". Entity names
-// interpolated elsewhere are constrained to PascalCase by the schema, so they
-// need no escaping.
+// label, so a role reaches the diagram as the text its author wrote. Entity
+// names interpolated elsewhere are constrained to PascalCase by the schema, so
+// they need no escaping.
+//
+// Square brackets are replaced with parentheses because Mermaid uses them for
+// node/attribute syntax; backticks, quotes and backslashes are neutralized and
+// newlines collapsed. Dropping the backslash also keeps the %q the callers emit
+// with from doubling it into a visible "\\".
+//
+// A run of two or more percent signs collapses to one. Mermaid reads "%%{...}%%"
+// anywhere in the source as a configuration directive, not as label text: a role
+// carrying one restyles the whole diagram and loses its own label (issue #29).
+// A directive needs the doubled sign, so a single "%" is inert and an ordinary
+// "50% full" survives.
+//
+// "&", "<" and ">" become HTML character references, in that order so an
+// ampersand the author wrote is not read as part of a reference this function
+// introduced. Mermaid builds its labels as HTML: a raw "<angle>" is parsed as a
+// tag and disappears from the rendered diagram with no diagnostic, while the
+// reference form is decoded back to the literal character. This is an encoding,
+// not a visible escape — the reader sees exactly what the author typed.
 func sanitize(s string) string {
 	s = strings.ReplaceAll(s, "`", "")
 	s = strings.ReplaceAll(s, "\"", "'")
 	s = strings.ReplaceAll(s, "\\", "")
 	s = strings.ReplaceAll(s, "[", "(")
 	s = strings.ReplaceAll(s, "]", ")")
+	s = percentRunRE.ReplaceAllString(s, "%")
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\t", " ")
