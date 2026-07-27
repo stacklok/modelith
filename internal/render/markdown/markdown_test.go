@@ -478,3 +478,180 @@ func TestRenderEntity_SubtypeHierarchy(t *testing.T) {
 		t.Errorf("expected parent to list its subtypes:\n%s", got)
 	}
 }
+
+// TestProse_EscapesHTMLOutsideCodeSpans pins the escaping rule ADR-0014
+// records, case by case: angle brackets become character references outside a
+// code span and are left alone inside one, an ampersand is escaped only where
+// it introduces a character reference, and Markdown is never touched.
+func TestProse_EscapesHTMLOutsideCodeSpans(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ name, in, want string }{
+		{"plain text", "A parking ticket.", "A parking ticket."},
+		{"tag", "an <img src=q onerror=alert(1)> tag", "an &lt;img src=q onerror=alert(1)&gt; tag"},
+		{"markdown survives", "a `Ticket` with *emphasis*", "a `Ticket` with *emphasis*"},
+		{"inside a code span", "a `<x>` span", "a `<x>` span"},
+		{"in and out", "<a> `<b>` <c>", "&lt;a&gt; `<b>` &lt;c&gt;"},
+		{"unclosed span is text", "a ` <b> tail", "a ` &lt;b&gt; tail"},
+		{"double fence", "``a `<b>` c`` <d>", "``a `<b>` c`` &lt;d&gt;"},
+		{"bare ampersand", "R&D and a & b", "R&D and a & b"},
+		{"named reference", "&lt;pre&gt;", "&amp;lt;pre&amp;gt;"},
+		{"decimal reference", "&#60;", "&amp;#60;"},
+		{"hex reference", "&#x3c;", "&amp;#x3c;"},
+		{"reference-shaped but unterminated", "&lt and &amp", "&lt and &amp"},
+		{"reference inside a code span", "`&lt;`", "`&lt;`"},
+		{"comparison", "1 < 2 && 3 > 2", "1 &lt; 2 && 3 &gt; 2"},
+		{"multibyte passes through", "café — naïve <x>", "café — naïve &lt;x&gt;"},
+	}
+	for _, tc := range cases {
+		if got := prose(tc.in); got != tc.want {
+			t.Errorf("%s: prose(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestADR_0014_ProseRendersHTMLAsText walks every prose-bearing field through a
+// render and checks that raw HTML lands as visible text rather than as markup,
+// while the Markdown those fields are written in still works. Before the fix
+// each of these strings reached the document as live HTML.
+func TestADR_0014_ProseRendersHTMLAsText(t *testing.T) {
+	t.Parallel()
+
+	const tag = "<img src=q onerror=alert(1)>"
+	m := &model.Model{
+		Title:       "Title " + tag,
+		Description: "Description " + tag,
+		Glossary:    map[string]string{"Attendant": "Glossary " + tag},
+		Enums: map[string]model.Enum{
+			"Status": {
+				Description: "Enum " + tag,
+				Values:      []model.EnumValue{{Name: "active", Definition: "Value " + tag}},
+			},
+		},
+		Entities: map[string]model.Entity{
+			"Ticket": {
+				Definition: "Definition " + tag + " with a `code <span>` and *emphasis*",
+				Derived:    true,
+				Derivation: "Derivation " + tag,
+				Relationships: []model.Relationship{
+					{Entity: "Policy", Cardinality: "1:n", Role: "Role " + tag, Note: "Note " + tag},
+				},
+				Attributes: []model.Attribute{
+					{Name: "paid", Type: "map<string, int>", Description: "Attribute " + tag},
+				},
+				Actions: []model.Action{
+					{Name: "pay", Actor: "Attendant", Preserves: []string{"pre-" + tag}, Description: "Action " + tag},
+				},
+				Invariants: []model.Invariant{{ID: "ticket-paid", Statement: "Invariant " + tag}},
+			},
+			"Policy": {Definition: "A policy."},
+		},
+		Invariants: []model.Invariant{{ID: "model-rule", Statement: "Model invariant " + tag}},
+		Scenarios: []model.Scenario{{
+			Name:              "Scenario " + tag,
+			Description:       "Scenario description " + tag,
+			Actors:            []string{"Actor " + tag},
+			Steps:             []string{"Step " + tag},
+			InvariantsTouched: []string{"ticket-paid", "touched-" + tag},
+		}},
+	}
+	got := render(m)
+
+	const escaped = "&lt;img src=q onerror=alert(1)&gt;"
+	// One occurrence per field above, plus the two invariant statements repeated
+	// under "Invariants touched" — every one of them escaped.
+	for _, field := range []string{
+		"Title", "Description", "Glossary", "Enum", "Value", "Definition",
+		"Derivation", "Role", "Note", "Attribute", "Action", "Invariant",
+		"Model invariant", "Scenario", "Scenario description", "Actor", "Step",
+		"pre-", "touched-",
+	} {
+		if !strings.Contains(got, field+" "+escaped) && !strings.Contains(got, field+escaped) {
+			t.Errorf("%s field did not render its tag as text:\n%s", field, got)
+		}
+	}
+	if strings.Contains(got, tag) {
+		t.Errorf("a raw tag survived into the document:\n%s", got)
+	}
+	// The type column is prose too, and a conceptual type may hold angle
+	// brackets legitimately.
+	if !strings.Contains(got, "| map&lt;string, int&gt; |") {
+		t.Errorf("expected an escaped attribute type:\n%s", got)
+	}
+	// Markdown in prose is the point of not escaping everything: the code span
+	// keeps its angle brackets literal and the emphasis still renders.
+	if !strings.Contains(got, "a `code <span>` and *emphasis*") {
+		t.Errorf("expected Markdown and its code span to survive intact:\n%s", got)
+	}
+}
+
+// TestRenderCodeSpans_HostileNamesStayInsideTheirSpan is the regression for
+// issue #35: a backtick in an unconstrained field closed its code span early
+// and let the remainder land as live Markdown. Every one of these fields is a
+// bare string in the schema, so only the renderer can hold the line.
+func TestRenderCodeSpans_HostileNamesStayInsideTheirSpan(t *testing.T) {
+	t.Parallel()
+
+	const breakout = "a ` <img src=q onerror=alert(1)> `"
+	m := &model.Model{
+		Enums: map[string]model.Enum{
+			"Status": {Values: []model.EnumValue{{Name: breakout}, {Name: "pipe|value"}}},
+		},
+		Entities: map[string]model.Entity{
+			"Ticket": {
+				Definition: "A stub.",
+				Attributes: []model.Attribute{{Name: breakout, Type: "string"}, {Name: "pipe|name", Type: "string"}},
+				Actions: []model.Action{
+					{Name: breakout},
+					{Name: "structured " + breakout, Actor: "actor " + breakout},
+				},
+			},
+		},
+	}
+	got := render(m)
+
+	// The fence widens to two backticks and the value is padded, so the whole
+	// string stays inside the span (CommonMark strips the padding on render).
+	const span = "`` a ` <img src=q onerror=alert(1)> ` ``"
+	for _, want := range []string{
+		"| " + span + " |",                        // enum value name
+		"| " + span + " | string |",               // attribute name
+		"- `` structured a ` <img",                // structured action name
+		"actor `` actor a ` <img",                 // action actor
+		"- `` a ` <img",                           // bare action name, detailed list
+		"| `pipe\\|value` |", "| `pipe\\|name` |", // a pipe cannot end the cell
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in:\n%s", want, got)
+		}
+	}
+
+	// The inline "**Actions:**" line is a separate call site, reached only when
+	// no action carries structure.
+	inline := render(&model.Model{Entities: map[string]model.Entity{
+		"Ticket": {Definition: "A stub.", Actions: []model.Action{{Name: breakout}}},
+	}})
+	if want := "**Actions:** " + span + "\n"; !strings.Contains(inline, want) {
+		t.Errorf("expected %q in:\n%s", want, inline)
+	}
+
+	// Nothing hostile survives outside a code span. Strip every span and no
+	// fragment of the payload may remain.
+	for _, line := range strings.Split(got, "\n") {
+		bare := stripCodeSpans(line)
+		for _, tok := range []string{"<img", "onerror"} {
+			if strings.Contains(bare, tok) {
+				t.Errorf("%q escaped its code span in %q", tok, line)
+			}
+		}
+	}
+	// A table row's cell count is what a broken-out pipe would change.
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.HasPrefix(line, "| ") || strings.HasPrefix(line, "| ---") {
+			continue
+		}
+		if n := strings.Count(stripCodeSpans(line), "|"); n != 3 && n != 4 {
+			t.Errorf("row has %d unescaped pipes, want the header's count: %q", n, line)
+		}
+	}
+}
