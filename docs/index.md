@@ -55,3 +55,4 @@ fails on drift (`modelith render --check`) — like a generated-code check.
 | [Schema](./06-schema-reference.md) | The JSON Schema that defines a valid model |
 | [`modelith` CLI](./07-cli.md) | The `lint` / `render` engine the agent and CI run |
 | [GitHub Action](./08-github-action.md) | The same checks in CI |
+| [Vendoring](./10-vendoring.md) | Referencing a model that lives in another repository |

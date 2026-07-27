@@ -87,3 +87,32 @@ into another validator.
 ```sh
 modelith schema > modelith.schema.json
 ```
+
+## `modelith deps`
+
+Manages models **vendored** from other repositories — copies committed here and
+marked with a provenance header. This is the only command group that uses the
+network; `lint` and `render` never do.
+
+### `modelith deps import <url> [dir]`
+
+Fetches a model and writes it into `dir` (the working directory by default) as
+a vendored copy.
+
+```sh
+modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml docs/
+```
+
+| Argument / flag | Meaning |
+|---|---|
+| `<url>` | The address of the file as it appears in a browser on github.com. |
+| `[dir]` | Destination **directory**, defaulting to `.`. The filename always comes from the origin. |
+| `--ref` | Ref to fetch, overriding the one in the URL. A tag pins the copy; also how you disambiguate a branch name containing a slash. |
+
+Fetching is delegated to [`gh`](https://cli.github.com), which must be installed
+and authenticated. The command writes the file and prints the `imports:` entry
+to add — it does not edit your model.
+
+See [Vendoring a model from another
+repository](./10-vendoring.md) for what the header records, how a vendored file
+is linted differently, and why vendoring fetches one file rather than a tree.

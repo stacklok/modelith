@@ -335,6 +335,8 @@ Six rules are worth knowing before you use this:
 - **Nothing is fetched.** `imports` names files that are already in your
   repository; `lint` and `render` never touch the network
   ([ADR-0011](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0011-network-boundary.md)).
+  Getting a model from *another* repository into yours is a separate, explicit
+  step — see [Vendoring](./10-vendoring.md).
 - **An import cannot leave the repository.** `..` is fine, but only as far as
   the repository holding the model — the nearest directory above it with a
   `.git` entry. Past that it is an error naming where the path resolved to and

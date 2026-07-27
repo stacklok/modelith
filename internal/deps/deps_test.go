@@ -251,7 +251,11 @@ func TestImport_EscapesAPathThatNeedsIt(t *testing.T) {
 	}
 }
 
-func TestImport_ReportsTheirImportsWithoutFetchingThem(t *testing.T) {
+// TestADR_0015_ImportFetchesOneFileNotATree pins that vendoring does not
+// recurse. The fetched model's own imports are reported to the user and
+// nothing more: no extra call goes out, so no file arrives that the user did
+// not ask for, at a scope this repository never bound.
+func TestADR_0015_ImportFetchesOneFileNotATree(t *testing.T) {
 	t.Parallel()
 
 	chained := upstream + "imports:\n  - ./ledger.modelith.yaml\n  - ./tax.modelith.yaml\n"

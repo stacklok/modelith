@@ -34,6 +34,13 @@ type ExecRunner struct{}
 // Run executes name with args and returns its standard output. Standard error
 // is folded into the returned error, because gh reports why it refused there.
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	// nolint:gosec // G204 flags a variable command and arguments, which is
+	// what a transport seam is. The command is the literal "gh" at both call
+	// sites; the arguments are literals plus an endpoint assembled from a URL
+	// that ParseSource has already validated, with each path segment and query
+	// value escaped. Nothing here comes from a model file, and there is no
+	// shell: exec passes an argv array, so a metacharacter is a byte in an
+	// argument rather than syntax (ADR-0010).
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

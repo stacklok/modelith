@@ -52,6 +52,21 @@ and verifies it against the release's published checksums before running it. The
 pinning your `uses:` reference to a commit SHA, this keeps CI runs reproducible: a
 given action commit always installs the same `modelith` version.
 
+## Vendored models in the glob
+
+If your glob matches a model [vendored from another
+repository](./10-vendoring.md), the action treats it as somebody else's
+document:
+
+- **Completeness gaps in it are not reported**, so `completeness: error` cannot
+  fail your build over a model you did not write.
+- **`check-rendered` skips it**, so you are not asked to commit a `.md` whose
+  home is another repository.
+
+Everything else still applies. A vendored file that is not a valid domain
+model, or that has been edited since it was imported, fails the build — both
+are about *your* repository's copy, and both are yours to fix.
+
 ## Regenerating the Markdown
 
 The action **gates**; it does not commit. When `check-rendered` fails, run

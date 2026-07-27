@@ -51,7 +51,7 @@ func lintSource(t *testing.T, src string, files fakeFiles) *Result {
 	return res
 }
 
-// TestVendored_SuppressesCompletenessAndNothingElse pins ADR-0015's rule as a
+// TestADR_0015_HeaderSuppressesCompletenessOnly pins ADR-0015's rule as a
 // difference rather than as a hand-written expectation: the same model is linted
 // twice, once as this repository's own work and once as a vendored copy, and
 // every finding that disappears must be a completeness finding.
@@ -59,7 +59,7 @@ func lintSource(t *testing.T, src string, files fakeFiles) *Result {
 // Written this way the test cannot be satisfied by a suppression that is too
 // broad. A rule that also dropped semantic warnings would pass a test that
 // merely listed what a vendored file should report.
-func TestVendored_SuppressesCompletenessAndNothingElse(t *testing.T) {
+func TestADR_0015_HeaderSuppressesCompletenessOnly(t *testing.T) {
 	t.Parallel()
 
 	files := fakeFiles{".git": ""}

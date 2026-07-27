@@ -180,14 +180,14 @@ func TestParse_Problems(t *testing.T) {
 	}
 }
 
-// TestDigest_CoversTheFileWithoutItsHeader pins ADR-0015's digest definition.
+// TestADR_0015_DigestCoversTheFileWithoutItsHeader pins ADR-0015's digest definition.
 //
 // The expectation is built by hand — the header lines written out and removed
 // by the test itself, then hashed with crypto/sha256 directly — rather than by
 // calling Strip. A test that reuses the implementation's own helper would agree
 // with it however wrong the helper was, which is exactly how two HIGH bugs got
 // past CI in the renderer work.
-func TestDigest_CoversTheFileWithoutItsHeader(t *testing.T) {
+func TestADR_0015_DigestCoversTheFileWithoutItsHeader(t *testing.T) {
 	t.Parallel()
 
 	sum := sha256.Sum256([]byte(plain))
@@ -200,6 +200,37 @@ func TestDigest_CoversTheFileWithoutItsHeader(t *testing.T) {
 		t.Errorf("Digest(vendored) = %s, want %s — the header must not change the digest of the file it is stamped into", got, want)
 	}
 }
+
+// TestADR_0015_UnknownFetchMethodIsAnError pins that the fetch method is a
+// closed set. A header naming a method this build does not implement is
+// reported rather than being read as if it were git — which would verify a
+// digest against keys that mean something else — and the diagnostic asks for an
+// issue, because a real user wanting another transport is what justifies
+// writing one.
+func TestADR_0015_UnknownFetchMethodIsAnError(t *testing.T) {
+	t.Parallel()
+
+	src := strings.Replace(vendored, LinePrefix+"fetch: git", LinePrefix+"fetch: carrier-pigeon", 1)
+	_, problems := Parse([]byte(src))
+
+	var found bool
+	for _, p := range problems {
+		if strings.Contains(p.Message, `unknown fetch method "carrier-pigeon"`) {
+			found = true
+			if !strings.Contains(p.Message, issuesHint) {
+				t.Errorf("the diagnostic does not ask for an issue: %s", p.Message)
+			}
+			if !strings.Contains(p.Message, `"git"`) {
+				t.Errorf("the diagnostic does not name the methods that work: %s", p.Message)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no unknown-method problem; got %+v", problems)
+	}
+}
+
+const issuesHint = "https://github.com/stacklok/modelith/issues"
 
 func TestDigest_ChangesWithTheContent(t *testing.T) {
 	t.Parallel()
