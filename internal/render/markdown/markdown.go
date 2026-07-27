@@ -30,10 +30,6 @@ var (
 	qualifiedTypeRE = regexp.MustCompile(`^(` + model.ScopeSlug + `)\.([A-Z][A-Za-z0-9]*)$`)
 	// backtickRunRE finds the backtick runs a code span's fence has to clear.
 	backtickRunRE = regexp.MustCompile("`+")
-	// entityRefRE matches, anchored at an "&", the character references a
-	// Markdown parser decodes. Anything else beginning with "&" is an ordinary
-	// ampersand and is left alone; see escapeProse.
-	entityRefRE = regexp.MustCompile(`^&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
 )
 
 // Render produces the full Markdown document for the model. sourceDir is the
@@ -80,7 +76,7 @@ func renderInvariants(b *strings.Builder, m *model.Model) {
 	}
 	b.WriteString("## Invariants\n\n")
 	for _, inv := range m.Invariants {
-		fmt.Fprintf(b, "- **%s** — %s\n", inv.ID, proseLine(inv.Statement))
+		fmt.Fprintf(b, "- %s\n", invariantLine(inv.ID, inv.Statement))
 	}
 	b.WriteString("\n")
 }
@@ -196,7 +192,7 @@ func renderGlossary(b *strings.Builder, m *model.Model) {
 	}
 	sort.Strings(terms)
 	for _, t := range terms {
-		fmt.Fprintf(b, "- **`%s`** — %s\n", t, proseLine(m.Glossary[t]))
+		fmt.Fprintf(b, "- %s\n", assembledLine("**"+codeSpan(t)+"**", oneLine(m.Glossary[t])))
 	}
 	b.WriteString("\n")
 }
@@ -283,12 +279,12 @@ func renderEntities(b *strings.Builder, m *model.Model, sourceDir, outDir string
 					parts = append(parts, rel.Ownership)
 				}
 				if rel.Role != "" {
-					parts = append(parts, proseLine(rel.Role))
+					parts = append(parts, oneLine(rel.Role))
 				}
 				if rel.Note != "" {
-					parts = append(parts, proseLine(rel.Note))
+					parts = append(parts, oneLine(rel.Note))
 				}
-				fmt.Fprintf(b, "- %s\n", strings.Join(parts, " — "))
+				fmt.Fprintf(b, "- %s\n", assembledLine(parts...))
 			}
 			b.WriteString("\n")
 		}
@@ -320,7 +316,7 @@ func renderEntities(b *strings.Builder, m *model.Model, sourceDir, outDir string
 		if len(ent.Invariants) > 0 {
 			b.WriteString("**Invariants**\n\n")
 			for _, inv := range ent.Invariants {
-				fmt.Fprintf(b, "- **%s** — %s\n", inv.ID, proseLine(inv.Statement))
+				fmt.Fprintf(b, "- %s\n", invariantLine(inv.ID, inv.Statement))
 			}
 			b.WriteString("\n")
 		}
@@ -346,7 +342,7 @@ func renderActions(b *strings.Builder, actions []model.Action) {
 		for i, a := range actions {
 			quoted[i] = codeSpan(a.Name)
 		}
-		fmt.Fprintf(b, "**Actions:** %s\n\n", strings.Join(quoted, ", "))
+		fmt.Fprintf(b, "%s\n\n", escapeProse("**Actions:** "+strings.Join(quoted, ", "), false))
 		return
 	}
 
@@ -359,18 +355,18 @@ func renderActions(b *strings.Builder, actions []model.Action) {
 		if len(a.Preserves) > 0 {
 			preserves := make([]string, len(a.Preserves))
 			for i, id := range a.Preserves {
-				preserves[i] = proseLine(id)
+				preserves[i] = oneLine(id)
 			}
 			detail = append(detail, "preserves "+strings.Join(preserves, ", "))
 		}
-		line := codeSpan(a.Name)
+		parts := []string{codeSpan(a.Name)}
 		if len(detail) > 0 {
-			line += " — " + strings.Join(detail, "; ")
+			parts = append(parts, strings.Join(detail, "; "))
 		}
 		if a.Description != "" {
-			line += " — " + proseLine(a.Description)
+			parts = append(parts, oneLine(a.Description))
 		}
-		fmt.Fprintf(b, "- %s\n", line)
+		fmt.Fprintf(b, "- %s\n", assembledLine(parts...))
 	}
 	b.WriteString("\n")
 }
@@ -414,9 +410,9 @@ func renderScenarios(b *strings.Builder, m *model.Model) {
 		if len(sc.Actors) > 0 {
 			actors := make([]string, len(sc.Actors))
 			for i, a := range sc.Actors {
-				actors[i] = proseLine(a)
+				actors[i] = oneLine(a)
 			}
-			fmt.Fprintf(b, "**Actors:** %s\n\n", strings.Join(actors, ", "))
+			fmt.Fprintf(b, "%s\n\n", escapeProse("**Actors:** "+strings.Join(actors, ", "), false))
 		}
 
 		if len(sc.Steps) > 0 {
@@ -431,9 +427,9 @@ func renderScenarios(b *strings.Builder, m *model.Model) {
 			b.WriteString("**Invariants touched**\n\n")
 			for _, id := range sc.InvariantsTouched {
 				if s, ok := statement[id]; ok {
-					fmt.Fprintf(b, "- **%s** — %s\n", proseLine(id), proseLine(s))
+					fmt.Fprintf(b, "- %s\n", invariantLine(id, s))
 				} else {
-					fmt.Fprintf(b, "- **%s**\n", proseLine(id))
+					fmt.Fprintf(b, "- %s\n", escapeProse("**"+oneLine(id)+"**", false))
 				}
 			}
 			b.WriteString("\n")
@@ -441,8 +437,30 @@ func renderScenarios(b *strings.Builder, m *model.Model) {
 	}
 }
 
+// assembledLine joins the pieces of one rendered line with the em-dash
+// separator and escapes the result once, as the finished line.
+//
+// Escaping the pieces one at a time asked the wrong question. Whether a backtick
+// opens a code span, and so whether the tag behind it is literal, depends on
+// what else is on the line — so a stray backtick in a `role:` paired with the
+// backticks of the `note:` beside it and left the note's contents outside every
+// span, live (#37). Each piece is collapsed to a line by its caller; only the
+// assembled line is parsed, because only the assembled line is what the reader's
+// parser sees.
+func assembledLine(parts ...string) string {
+	return escapeProse(strings.Join(parts, " — "), false)
+}
+
+// invariantLine renders an invariant's id and statement as the one line they
+// share. Both are author-written, so they are escaped together; see
+// assembledLine.
+func invariantLine(id, statement string) string {
+	return assembledLine("**"+oneLine(id)+"**", oneLine(statement))
+}
+
 // mdCell escapes an author-written prose value for use inside a Markdown table
-// cell.
+// cell. A cell is escaped on its own because GFM splits a row into cells before
+// it parses any of them, so nothing in one cell can reach into the next.
 func mdCell(s string) string {
 	return cellEscape(proseLine(s))
 }
@@ -477,69 +495,83 @@ var mdParser = parser.NewParser(
 // byteRange is a half-open [start, stop) region of a prose string.
 type byteRange struct{ start, stop int }
 
+// linePrefix stands in, during the parse only, for the text a line-context
+// value follows on its rendered line: the "- ", "# ", "| " or "**Bold** — "
+// that always precedes it. Those bytes hold column zero, where a four-space
+// indent or a "```" run would otherwise open a code block. Parsed on its own
+// the same value can look like a code block, and a parser reports nothing
+// inside one as HTML — which would leave a tag live on a line that has no code
+// block in it. The offsets come back shifted by its length and are shifted off
+// again.
+const linePrefix = "x "
+
 // proseBlock escapes an author-written string that is emitted as its own block
 // — a model, enum or scenario description, an entity definition. Fenced and
-// indented code blocks are literal there, so they are left verbatim.
+// indented code blocks are real there, so their contents are text and stay
+// verbatim.
 func proseBlock(s string) string { return escapeProse(s, true) }
 
 // proseLine escapes an author-written string that lands inside a line — a
 // heading, a list item, a table cell — collapsing it to one line first.
 //
-// Only code spans are literal in that position. A leading "```" or four-space
-// indent cannot open a code block partway through a line, so this string,
-// parsed alone, may look like a code block where the document has ordinary
-// text; treating it as one would leave the HTML behind it live.
+// A value sharing its line with other author-written values is assembled first
+// and escaped once, by the call site, rather than passed here piece by piece:
+// what pairs with what is a property of the finished line (#37).
 func proseLine(s string) string { return escapeProse(oneLine(s), false) }
 
-// escapeProse escapes raw HTML in an author-written string while leaving its
-// Markdown intact. A `definition:` is Markdown — models backtick their entity
+// escapeProse escapes the raw HTML in an author-written string and leaves every
+// other byte alone. A `definition:` is Markdown — models backtick their entity
 // names throughout and authors use emphasis — but it is not HTML: an angle
 // bracket is text the author typed, not a tag to interpret (ADR-0014).
 //
-// Outside a literal region, "<" and ">" become character references so they
-// render as themselves. Inside one they are already literal, and escaping them
-// would put a visible "&lt;" on the page, so the region is copied through
-// whole.
-//
-// An "&" is escaped only where it introduces a character reference. Character
-// references cannot produce markup — a Markdown parser decodes one to a
-// character and re-escapes it on output — so this is fidelity, not safety: an
-// author who wrote "&lt;" sees "&lt;", the same rule as one who wrote "<". A
-// bare ampersand ("R&D", "a & b") already renders as itself and passes through
-// untouched, which keeps the committed Markdown readable.
+// The rule is an allowlist of what to escape, not of what to leave: exactly the
+// bytes a parser reported as markup are escaped, and everything else is copied
+// through. Escaping by exclusion was the same idea inverted, and it escaped
+// Markdown structure — a ">" that opened a blockquote, the "<...>" around a link
+// destination — which changed how the text parsed and so invalidated the very
+// offsets it was writing at (#37).
 func escapeProse(s string, blockContext bool) string {
+	ranges := markupRanges(s, blockContext)
+	if len(ranges) == 0 {
+		return s
+	}
 	var b strings.Builder
 	i := 0
-	for _, r := range literalRanges(s, blockContext) {
-		escapeMarkup(&b, s[i:r.start])
-		b.WriteString(s[r.start:r.stop])
+	for _, r := range ranges {
+		b.WriteString(s[i:r.start])
+		escapeMarkup(&b, s[r.start:r.stop])
 		i = r.stop
 	}
-	escapeMarkup(&b, s[i:])
+	b.WriteString(s[i:])
 	return b.String()
 }
 
-// literalRanges returns the regions of s a CommonMark parser treats as literal
-// text: the contents of code spans, and — in block context only — of fenced and
-// indented code blocks. The ranges are sorted and do not overlap.
+// markupRanges returns the regions of s that a CommonMark parser reads as
+// markup rather than as text, sorted and non-overlapping: the tags of every
+// raw-HTML node, and a code fence's info string.
 //
 // The parse is what decides. A hand-rolled backtick scanner has no model of
-// block structure or of backslash escapes, so it reads an escaped "\`" as a
-// delimiter and lets a span run across a paragraph break — two ways to declare
-// raw HTML literal that a real parser never would (#37).
+// block structure or of backslash escapes, so it read an escaped "\`" as a
+// delimiter and let a span run across a paragraph break — two ways to call raw
+// HTML literal that a real parser never would (#37).
 //
-// A code fence's info string is not returned: it is an attribute of the block
-// rather than text on the page, so escaping it costs nothing and keeps an
-// unclosed fence from carrying a tag on its opening line.
-func literalRanges(s string, blockContext bool) []byteRange {
-	src := parseSource(s)
+// A code fence's info string is markup by the same test: it reaches the page as
+// a class attribute rather than as text, so escaping it costs nothing and keeps
+// an unclosed fence from carrying a tag on its opening line. It is also inert to
+// block structure, so escaping it cannot disturb the parse it came from.
+func markupRanges(s string, blockContext bool) []byteRange {
+	src, shift := parseSource(s, blockContext)
 	var out []byteRange
-	appendSegments := func(segs *text.Segments) {
+	add := func(start, stop int) {
+		start, stop = max(start-shift, 0), min(stop-shift, len(s))
+		if start < stop {
+			out = append(out, byteRange{start, stop})
+		}
+	}
+	addSegments := func(segs *text.Segments) {
 		for i := 0; i < segs.Len(); i++ {
 			seg := segs.At(i)
-			if stop := min(seg.Stop, len(s)); seg.Start < stop {
-				out = append(out, byteRange{seg.Start, stop})
-			}
+			add(seg.Start, seg.Stop)
 		}
 	}
 	// Walk never returns an error: the callback below returns none.
@@ -548,19 +580,16 @@ func literalRanges(s string, blockContext bool) []byteRange {
 			return ast.WalkContinue, nil
 		}
 		switch node := n.(type) {
-		case *ast.CodeSpan:
-			for c := node.FirstChild(); c != nil; c = c.NextSibling() {
-				if t, ok := c.(*ast.Text); ok {
-					out = append(out, byteRange{t.Segment.Start, t.Segment.Stop})
-				}
+		case *ast.RawHTML:
+			addSegments(node.Segments)
+		case *ast.HTMLBlock:
+			addSegments(node.Lines())
+			if node.HasClosure() {
+				add(node.ClosureLine.Start, node.ClosureLine.Stop)
 			}
 		case *ast.FencedCodeBlock:
-			if blockContext {
-				appendSegments(node.Lines())
-			}
-		case *ast.CodeBlock:
-			if blockContext {
-				appendSegments(node.Lines())
+			if node.Info != nil {
+				add(node.Info.Segment.Start, node.Info.Segment.Stop)
 			}
 		}
 		return ast.WalkContinue, nil
@@ -579,33 +608,42 @@ func literalRanges(s string, blockContext bool) []byteRange {
 	return merged
 }
 
-// parseSource returns the bytes to hand the parser for s. The trailing newline
-// is a workaround, not a nicety. goldmark decides whether a line is blank by
-// comparing an indent measured in *columns* against the line's length in
-// *bytes*, so a final line short enough for a tab to outrun it — "> \t`" — is
-// called blank, and the fenced-code-block parser then indexes it at the -1 that
-// marks one. That panics `modelith render` on a model that lints clean.
+// parseSource returns the bytes to hand the parser for s and the offset its
+// reported positions carry as a result, so a range in the parse maps back to
+// s[start-shift : stop-shift].
 //
-// A line ending keeps the comparison honest and costs nothing: a document is
-// defined to end with one, and appending it moves no offset inside s. Upstream
-// yuin/goldmark#556 fixed one path into the same -1 and v1.8.4 carries that
-// fix; this input reaches it by another, and #556's own repro still panics on
-// v1.8.4. TestRender_UnnormalisedProseDoesNotPanic guards it.
-func parseSource(s string) []byte {
+// The trailing newline is a workaround, not a nicety. goldmark decides whether
+// a line is blank by comparing an indent measured in *columns* against the
+// line's length in *bytes*, so a final line short enough for a tab to outrun it
+// — "> \t`" — is called blank, and the fenced-code-block parser then indexes it
+// at the -1 that marks one. That panics `render` on a model that lints clean.
+// A line ending keeps the comparison honest, costs nothing (a document is
+// defined to end with one) and, appended at the end, moves no offset in s.
+// Upstream yuin/goldmark#556 fixed one path into the same -1 and v1.8.4 carries
+// that fix; this input reaches it by another, and #556's own repro still panics
+// on v1.8.4. TestRender_UnnormalisedProseDoesNotPanic guards it.
+func parseSource(s string, blockContext bool) ([]byte, int) {
+	shift := 0
+	if !blockContext {
+		s = linePrefix + s
+		shift = len(linePrefix)
+	}
 	if !strings.HasSuffix(s, "\n") {
 		s += "\n"
 	}
-	return []byte(s)
+	return []byte(s), shift
 }
 
+// escapeMarkup writes s as the text it should have been. A character reference
+// is text to every Markdown parser, so nothing here can become a tag again.
 func escapeMarkup(b *strings.Builder, s string) {
 	for i := 0; i < len(s); i++ {
-		switch c := s[i]; {
-		case c == '<':
+		switch c := s[i]; c {
+		case '<':
 			b.WriteString("&lt;")
-		case c == '>':
+		case '>':
 			b.WriteString("&gt;")
-		case c == '&' && entityRefRE.MatchString(s[i:]):
+		case '&':
 			b.WriteString("&amp;")
 		default:
 			b.WriteByte(c)

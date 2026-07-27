@@ -629,14 +629,37 @@ func TestProse_EscapesHTMLOutsideCodeSpans(t *testing.T) {
 		{name: "in and out", in: "<a> `<b>` <c>", want: "&lt;a&gt; `<b>` &lt;c&gt;"},
 		{name: "unclosed span is text", in: "a ` <b> tail", want: "a ` &lt;b&gt; tail"},
 		{name: "double fence", in: "``a `<b>` c`` <d>", want: "``a `<b>` c`` &lt;d&gt;"},
+		// An "&" is markup to nobody, so every one of these is left as the
+		// author typed it. A character reference renders as the character it
+		// names, which is what the author asked for; it can never become a tag,
+		// because a parser decodes it to text and re-escapes it on output.
 		{name: "bare ampersand", in: "R&D and a & b", want: "R&D and a & b"},
-		{name: "named reference", in: "&lt;pre&gt;", want: "&amp;lt;pre&amp;gt;"},
-		{name: "decimal reference", in: "&#60;", want: "&amp;#60;"},
-		{name: "hex reference", in: "&#x3c;", want: "&amp;#x3c;"},
+		{name: "named reference", in: "&lt;pre&gt;", want: "&lt;pre&gt;"},
+		{name: "decimal reference", in: "&#60;", want: "&#60;"},
+		{name: "hex reference", in: "&#x3c;", want: "&#x3c;"},
 		{name: "reference-shaped but unterminated", in: "&lt and &amp", want: "&lt and &amp"},
 		{name: "reference inside a code span", in: "`&lt;`", want: "`&lt;`"},
-		{name: "comparison", in: "1 < 2 && 3 > 2", want: "1 &lt; 2 && 3 &gt; 2"},
+		// An angle bracket that opens no tag is not markup and is not touched.
+		// A Markdown parser renders it as the character it is.
+		{name: "comparison", in: "1 < 2 && 3 > 2", want: "1 < 2 && 3 > 2"},
+		{name: "conceptual type", in: "map<string, int>", want: "map<string, int>"},
 		{name: "multibyte passes through", in: "café — naïve <x>", want: "café — naïve &lt;x&gt;"},
+		// An "&" inside a tag is escaped with it, so the whole tag reaches the
+		// page as the bytes the author typed.
+		{name: "ampersand inside a tag", in: `<a href="?a=1&amp;b=2">`, want: `&lt;a href="?a=1&amp;amp;b=2"&gt;`},
+
+		// Markdown structure is never escaped. Escaping it was the previous
+		// rule's undoing: a ">" turned into "&gt;" stops opening a blockquote,
+		// so the indented code block inside collapsed into a paragraph and
+		// shipped its contents live (#37 H2).
+		{
+			name:  "blockquote marker survives",
+			block: true,
+			in:    "Quoted from the migration notes:\n\n>     <script>alert(31)</script>\n\nNothing after is affected.",
+			want:  "Quoted from the migration notes:\n\n>     <script>alert(31)</script>\n\nNothing after is affected.",
+		},
+		{name: "angle-bracket link destination", in: "[click](<http://example.com/a>)", want: "[click](<http://example.com/a>)"},
+		{name: "autolink", in: "see <https://example.com> ok", want: "see <https://example.com> ok"},
 
 		// A backslash-escaped backtick is a literal character and opens
 		// nothing. The scanner this replaced read every backtick as a
@@ -827,9 +850,14 @@ func TestADR_0014_ProseRendersHTMLAsText(t *testing.T) {
 		t.Errorf("a raw tag survived into the document:\n%s", got)
 	}
 	// The type column is prose too, and a conceptual type may hold angle
-	// brackets legitimately.
-	if !strings.Contains(got, "| map&lt;string, int&gt; |") {
-		t.Errorf("expected an escaped attribute type:\n%s", got)
+	// brackets legitimately. "<string," opens no tag, so it is not markup and
+	// reaches the cell as the author wrote it — the rawHTML assertion below is
+	// what makes that safe rather than merely convenient.
+	if !strings.Contains(got, "| map<string, int> |") {
+		t.Errorf("expected the conceptual type verbatim:\n%s", got)
+	}
+	if html := rawHTML(t, got); len(html) > 0 {
+		t.Errorf("raw HTML survived the render: %q\n%s", html, got)
 	}
 	// Markdown in prose is the point of not escaping everything: the code span
 	// keeps its angle brackets literal and the emphasis still renders.
@@ -845,6 +873,9 @@ func TestADR_0014_ProseRendersHTMLAsText(t *testing.T) {
 // crashed `modelith render` with a Go stack trace before the trailing newline
 // went in; the first is upstream yuin/goldmark#556's own repro, which v1.8.4
 // still panics on despite carrying the fix for it.
+//
+// Rendering has to stay sane, not merely survive: the payloads come back as the
+// author typed them, and no raw HTML rides in on the workaround.
 func TestRender_UnnormalisedProseDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
@@ -865,10 +896,57 @@ func TestRender_UnnormalisedProseDoesNotPanic(t *testing.T) {
 				},
 				Scenarios: []model.Scenario{{Name: "Pay", Description: tc.payload}},
 			}
-			if html := rawHTML(t, render(m)); len(html) > 0 {
-				t.Errorf("raw HTML survived the render: %q", html)
+			got := render(m)
+			if !strings.Contains(got, tc.payload) {
+				t.Errorf("payload %q did not reach the page verbatim:\n%s", tc.payload, got)
+			}
+			if html := rawHTML(t, got); len(html) > 0 {
+				t.Errorf("raw HTML survived the render: %q\n%s", html, got)
 			}
 		})
+	}
+}
+
+// TestADR_0014_AssembledLineEscapesAsOneLine is the regression for the
+// cross-field pairing in #37: a `role:` and a `note:` are separate schema
+// fields that share one rendered line, so escaping them separately let a stray
+// backtick in the role pair with the note's backticks and leave the note's tag
+// outside every code span, live. Whether a span is open is a property of the
+// finished line, so the line is what gets escaped.
+func TestADR_0014_AssembledLineEscapesAsOneLine(t *testing.T) {
+	t.Parallel()
+
+	const tag = "<img src=q onerror=alert(1)>"
+	m := &model.Model{
+		Glossary: map[string]string{"Term": "a ` stray then `" + tag + "` here"},
+		Entities: map[string]model.Entity{
+			"Team": {
+				Definition: "A team.",
+				Relationships: []model.Relationship{
+					{Entity: "Member", Cardinality: "n:n", Role: "`Owner or `Member`", Note: "Rendered as `" + tag + "` in the UI"},
+				},
+				Actions: []model.Action{
+					{Name: "add", Preserves: []string{"a ` stray"}, Description: "Shown as `" + tag + "` there"},
+				},
+				Invariants: []model.Invariant{{ID: "one ` tick", Statement: "Holds for `" + tag + "` rows"}},
+			},
+			"Member": {Definition: "A member."},
+		},
+		Scenarios: []model.Scenario{{
+			Name:   "Join",
+			Actors: []string{"a ` stray", "the `" + tag + "` operator"},
+		}},
+	}
+	got := render(m)
+
+	if html := rawHTML(t, got); len(html) > 0 {
+		t.Errorf("a field paired with its neighbour and shipped live HTML %q:\n%s", html, got)
+	}
+	if bare := textOutsideCode(t, got); strings.Contains(bare, "<img") {
+		t.Errorf("a tag escaped its code span into the document text:\n%s", bare)
+	}
+	if strings.Contains(got, tag) {
+		t.Errorf("a raw tag survived into the document:\n%s", got)
 	}
 }
 
