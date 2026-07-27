@@ -142,6 +142,7 @@ func TestImports_Resolution(t *testing.T) {
 		"docs/shipping.modelith.yml":       paymentsModel,
 		"payments/payments.modelith.yaml":  paymentsModel,
 		"docs/legacy/pay-v2.modelith.yaml": paymentsModel,
+		"docs/PayMents.modelith.yaml":      paymentsModel,
 		"docs/not-a-model.yaml":            "kind: SomethingElse\nversion: v1\n",
 	}
 
@@ -232,6 +233,15 @@ func TestImports_Resolution(t *testing.T) {
 			name:     "explicit scope overrides the filename",
 			imports:  []string{"{scope: billing, path: ./legacy/pay-v2.modelith.yaml}"},
 			attrType: "billing.PaymentMethod",
+		},
+		{
+			// The complement of "bare import whose filename is not a usable
+			// slug": the same file, rescued by the explicit form. A written
+			// scope is validated by the schema, so the slug the filename would
+			// have yielded is never consulted.
+			name:     "explicit scope rescues a filename that is not a usable slug",
+			imports:  []string{"{scope: payments, path: ./PayMents.modelith.yaml}"},
+			attrType: "payments.PaymentMethod",
 		},
 		{
 			name:     "two imports binding the same scope",

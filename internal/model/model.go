@@ -57,11 +57,6 @@ const ScopeSlug = `[a-z][a-z0-9-]*`
 type Import struct {
 	Scope string `json:"scope"`
 	Path  string `json:"path"`
-	// ScopeFromPath records that Scope came from Path's basename rather than
-	// being written out, so the linter can point at the explicit form when a
-	// filename yields an unusable slug. The schema validates an explicit scope
-	// itself; a derived one it never sees.
-	ScopeFromPath bool `json:"-"`
 }
 
 // UnmarshalJSON lets an import be written as a bare path ("./payments.modelith.yaml",
@@ -77,7 +72,7 @@ func (i *Import) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(trimmed, &s); err != nil {
 			return err
 		}
-		*i = Import{Scope: ScopeFromPath(s), Path: s, ScopeFromPath: true}
+		*i = Import{Scope: ScopeFromPath(s), Path: s}
 		return nil
 	}
 	type rawImport Import

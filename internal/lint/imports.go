@@ -122,9 +122,11 @@ func loadImports(modelPath string, m *model.Model, files Files, res *Result) (by
 		// a duplicate binding is then reported on its own terms instead of being
 		// pre-empted by the second entry's unrelated trouble, and a broken path
 		// does not also make every "scope.Name" that names it look like a
-		// reference to nothing. A written scope is held to the pattern by the
-		// schema; a derived one the schema never sees.
-		scopeOK := !imp.ScopeFromPath || scopeRE.MatchString(imp.Scope)
+		// reference to nothing. A written scope is held to this same pattern by
+		// the schema, which runs before this layer and gates it, so a scope that
+		// fails here was derived from the filename — which is what the advice
+		// below assumes. TestInvariant_ScopeSlugMatchesSchema guards the two.
+		scopeOK := scopeRE.MatchString(imp.Scope)
 		if scopeOK {
 			if prev, dup := claimed[imp.Scope]; dup {
 				reject("import %q binds scope %q, which import %q already binds — give one of them an explicit, different scope so %s.Name resolves unambiguously",

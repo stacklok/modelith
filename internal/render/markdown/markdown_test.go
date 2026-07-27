@@ -337,7 +337,7 @@ func TestRenderImports_SectionAndLinkedTypes(t *testing.T) {
 
 	m := &model.Model{
 		Imports: []model.Import{
-			{Scope: "payments", Path: "../payments/payments.modelith.yaml", ScopeFromPath: true},
+			{Scope: "payments", Path: "../payments/payments.modelith.yaml"},
 			{Scope: "billing", Path: "./legacy/pay-v2.modelith.yaml"},
 		},
 		Entities: map[string]model.Entity{
@@ -392,7 +392,7 @@ func TestRenderImports_LinkRelativeToOutputDir(t *testing.T) {
 
 	m := &model.Model{
 		Imports: []model.Import{
-			{Scope: "payments", Path: "../payments/payments.modelith.yaml", ScopeFromPath: true},
+			{Scope: "payments", Path: "../payments/payments.modelith.yaml"},
 			{Scope: "billing", Path: "./legacy/pay-v2.modelith.yaml"},
 		},
 		Entities: map[string]model.Entity{
@@ -507,7 +507,7 @@ func TestRenderImports_HostilePathCannotEscapeItsMarkup(t *testing.T) {
 			{Scope: "spaced", Path: "./a b.modelith.yaml"},
 			// A newline would inject a heading into the Imports list; the derived
 			// scope carries it too, since it comes from the same string.
-			{Scope: "line\nbreak", Path: "./a\n## Injected\n\nb.modelith.yaml", ScopeFromPath: true},
+			{Scope: "line\nbreak", Path: "./a\n## Injected\n\nb.modelith.yaml"},
 			{Scope: "ticked", Path: "./a`b``c.modelith.yaml"},
 		},
 		Entities: map[string]model.Entity{

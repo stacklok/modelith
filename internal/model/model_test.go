@@ -185,7 +185,7 @@ entities:
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []Import{
-		{Scope: "payments", Path: "./payments.modelith.yaml", ScopeFromPath: true},
+		{Scope: "payments", Path: "./payments.modelith.yaml"},
 		{Scope: "billing", Path: "./legacy/pay-v2.modelith.yaml"},
 	}
 	if len(m.Imports) != len(want) {
