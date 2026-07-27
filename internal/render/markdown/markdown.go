@@ -11,6 +11,10 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/text"
+
 	"github.com/stacklok/modelith/internal/model"
 	"github.com/stacklok/modelith/internal/render/mermaid"
 )
@@ -28,7 +32,7 @@ var (
 	backtickRunRE = regexp.MustCompile("`+")
 	// entityRefRE matches, anchored at an "&", the character references a
 	// Markdown parser decodes. Anything else beginning with "&" is an ordinary
-	// ampersand and is left alone; see prose.
+	// ampersand and is left alone; see escapeProse.
 	entityRefRE = regexp.MustCompile(`^&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
 )
 
@@ -48,10 +52,10 @@ func Render(m *model.Model, sourceDir, outDir string) string {
 	if title == "" {
 		title = "Domain Model"
 	}
-	fmt.Fprintf(&b, "# %s\n\n", prose(oneLine(title)))
+	fmt.Fprintf(&b, "# %s\n\n", proseLine(title))
 
 	if desc := strings.TrimSpace(m.Description); desc != "" {
-		b.WriteString(prose(desc))
+		b.WriteString(proseBlock(desc))
 		b.WriteString("\n\n")
 	}
 
@@ -76,7 +80,7 @@ func renderInvariants(b *strings.Builder, m *model.Model) {
 	}
 	b.WriteString("## Invariants\n\n")
 	for _, inv := range m.Invariants {
-		fmt.Fprintf(b, "- **%s** — %s\n", inv.ID, prose(oneLine(inv.Statement)))
+		fmt.Fprintf(b, "- **%s** — %s\n", inv.ID, proseLine(inv.Statement))
 	}
 	b.WriteString("\n")
 }
@@ -192,7 +196,7 @@ func renderGlossary(b *strings.Builder, m *model.Model) {
 	}
 	sort.Strings(terms)
 	for _, t := range terms {
-		fmt.Fprintf(b, "- **`%s`** — %s\n", t, prose(oneLine(m.Glossary[t])))
+		fmt.Fprintf(b, "- **`%s`** — %s\n", t, proseLine(m.Glossary[t]))
 	}
 	b.WriteString("\n")
 }
@@ -212,7 +216,7 @@ func renderEnums(b *strings.Builder, m *model.Model) {
 		en := m.Enums[name]
 		fmt.Fprintf(b, "### `%s`\n\n", name)
 		if d := strings.TrimSpace(en.Description); d != "" {
-			b.WriteString(prose(d))
+			b.WriteString(proseBlock(d))
 			b.WriteString("\n\n")
 		}
 		b.WriteString("| Value | Definition |\n")
@@ -244,7 +248,7 @@ func renderEntities(b *strings.Builder, m *model.Model, sourceDir, outDir string
 		fmt.Fprintf(b, "### `%s`\n\n", name)
 
 		if def := strings.TrimSpace(ent.Definition); def != "" {
-			b.WriteString(prose(def))
+			b.WriteString(proseBlock(def))
 			b.WriteString("\n\n")
 		}
 
@@ -262,7 +266,7 @@ func renderEntities(b *strings.Builder, m *model.Model, sourceDir, outDir string
 		if ent.Derived {
 			d := "**Derived.** Computed on demand from other state; never persisted."
 			if derivation := strings.TrimSpace(ent.Derivation); derivation != "" {
-				d = fmt.Sprintf("**Derived:** %s", prose(derivation))
+				d = fmt.Sprintf("**Derived:** %s", proseLine(derivation))
 			}
 			b.WriteString(d)
 			b.WriteString("\n\n")
@@ -279,10 +283,10 @@ func renderEntities(b *strings.Builder, m *model.Model, sourceDir, outDir string
 					parts = append(parts, rel.Ownership)
 				}
 				if rel.Role != "" {
-					parts = append(parts, prose(oneLine(rel.Role)))
+					parts = append(parts, proseLine(rel.Role))
 				}
 				if rel.Note != "" {
-					parts = append(parts, prose(oneLine(rel.Note)))
+					parts = append(parts, proseLine(rel.Note))
 				}
 				fmt.Fprintf(b, "- %s\n", strings.Join(parts, " — "))
 			}
@@ -316,7 +320,7 @@ func renderEntities(b *strings.Builder, m *model.Model, sourceDir, outDir string
 		if len(ent.Invariants) > 0 {
 			b.WriteString("**Invariants**\n\n")
 			for _, inv := range ent.Invariants {
-				fmt.Fprintf(b, "- **%s** — %s\n", inv.ID, prose(oneLine(inv.Statement)))
+				fmt.Fprintf(b, "- **%s** — %s\n", inv.ID, proseLine(inv.Statement))
 			}
 			b.WriteString("\n")
 		}
@@ -355,7 +359,7 @@ func renderActions(b *strings.Builder, actions []model.Action) {
 		if len(a.Preserves) > 0 {
 			preserves := make([]string, len(a.Preserves))
 			for i, id := range a.Preserves {
-				preserves[i] = prose(oneLine(id))
+				preserves[i] = proseLine(id)
 			}
 			detail = append(detail, "preserves "+strings.Join(preserves, ", "))
 		}
@@ -364,7 +368,7 @@ func renderActions(b *strings.Builder, actions []model.Action) {
 			line += " — " + strings.Join(detail, "; ")
 		}
 		if a.Description != "" {
-			line += " — " + prose(oneLine(a.Description))
+			line += " — " + proseLine(a.Description)
 		}
 		fmt.Fprintf(b, "- %s\n", line)
 	}
@@ -400,17 +404,17 @@ func renderScenarios(b *strings.Builder, m *model.Model) {
 
 	b.WriteString("## Scenarios\n\n")
 	for _, sc := range m.Scenarios {
-		fmt.Fprintf(b, "### %s\n\n", prose(oneLine(sc.Name)))
+		fmt.Fprintf(b, "### %s\n\n", proseLine(sc.Name))
 
 		if desc := strings.TrimSpace(sc.Description); desc != "" {
-			b.WriteString(prose(desc))
+			b.WriteString(proseBlock(desc))
 			b.WriteString("\n\n")
 		}
 
 		if len(sc.Actors) > 0 {
 			actors := make([]string, len(sc.Actors))
 			for i, a := range sc.Actors {
-				actors[i] = prose(oneLine(a))
+				actors[i] = proseLine(a)
 			}
 			fmt.Fprintf(b, "**Actors:** %s\n\n", strings.Join(actors, ", "))
 		}
@@ -418,7 +422,7 @@ func renderScenarios(b *strings.Builder, m *model.Model) {
 		if len(sc.Steps) > 0 {
 			b.WriteString("**Steps**\n\n")
 			for i, step := range sc.Steps {
-				fmt.Fprintf(b, "%d. %s\n", i+1, prose(oneLine(step)))
+				fmt.Fprintf(b, "%d. %s\n", i+1, proseLine(step))
 			}
 			b.WriteString("\n")
 		}
@@ -427,9 +431,9 @@ func renderScenarios(b *strings.Builder, m *model.Model) {
 			b.WriteString("**Invariants touched**\n\n")
 			for _, id := range sc.InvariantsTouched {
 				if s, ok := statement[id]; ok {
-					fmt.Fprintf(b, "- **%s** — %s\n", prose(oneLine(id)), prose(oneLine(s)))
+					fmt.Fprintf(b, "- **%s** — %s\n", proseLine(id), proseLine(s))
 				} else {
-					fmt.Fprintf(b, "- **%s**\n", prose(oneLine(id)))
+					fmt.Fprintf(b, "- **%s**\n", proseLine(id))
 				}
 			}
 			b.WriteString("\n")
@@ -440,7 +444,7 @@ func renderScenarios(b *strings.Builder, m *model.Model) {
 // mdCell escapes an author-written prose value for use inside a Markdown table
 // cell.
 func mdCell(s string) string {
-	return cellEscape(prose(oneLine(s)))
+	return cellEscape(proseLine(s))
 }
 
 // codeCell renders a value as a code span inside a Markdown table cell. GFM
@@ -454,14 +458,48 @@ func cellEscape(s string) string {
 	return strings.ReplaceAll(s, "|", "\\|")
 }
 
-// prose escapes raw HTML in an author-written string while leaving its Markdown
-// intact. A `definition:` is Markdown — models backtick their entity names
-// throughout and authors use emphasis — but it is not HTML: an angle bracket is
-// text the author typed, not a tag to interpret (ADR-0014).
+// mdParser is a CommonMark parser used only to locate the literal regions of a
+// prose string. Nothing is ever rendered through goldmark: its renderer
+// normalizes and reflows text, which would rewrite prose the author wrote and
+// churn every committed .md, so the escaping writes back into the original
+// bytes at the offsets the parse reports (ADR-0014).
 //
-// Outside a code span, "<" and ">" become character references so they render
-// as themselves. Inside one they are already literal, and escaping them would
-// put a visible "&lt;" on the page, so a code span is copied through whole.
+// The parser is built from the CommonMark defaults rather than through
+// goldmark.New so the HTML renderer never enters the binary. parser.Parse is
+// safe for concurrent use: its one-time setup is guarded by a sync.Once and
+// each call carries its own context.
+var mdParser = parser.NewParser(
+	parser.WithBlockParsers(parser.DefaultBlockParsers()...),
+	parser.WithInlineParsers(parser.DefaultInlineParsers()...),
+	parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
+)
+
+// byteRange is a half-open [start, stop) region of a prose string.
+type byteRange struct{ start, stop int }
+
+// proseBlock escapes an author-written string that is emitted as its own block
+// — a model, enum or scenario description, an entity definition. Fenced and
+// indented code blocks are literal there, so they are left verbatim.
+func proseBlock(s string) string { return escapeProse(s, true) }
+
+// proseLine escapes an author-written string that lands inside a line — a
+// heading, a list item, a table cell — collapsing it to one line first.
+//
+// Only code spans are literal in that position. A leading "```" or four-space
+// indent cannot open a code block partway through a line, so this string,
+// parsed alone, may look like a code block where the document has ordinary
+// text; treating it as one would leave the HTML behind it live.
+func proseLine(s string) string { return escapeProse(oneLine(s), false) }
+
+// escapeProse escapes raw HTML in an author-written string while leaving its
+// Markdown intact. A `definition:` is Markdown — models backtick their entity
+// names throughout and authors use emphasis — but it is not HTML: an angle
+// bracket is text the author typed, not a tag to interpret (ADR-0014).
+//
+// Outside a literal region, "<" and ">" become character references so they
+// render as themselves. Inside one they are already literal, and escaping them
+// would put a visible "&lt;" on the page, so the region is copied through
+// whole.
 //
 // An "&" is escaped only where it introduces a character reference. Character
 // references cannot produce markup — a Markdown parser decodes one to a
@@ -469,57 +507,89 @@ func cellEscape(s string) string {
 // author who wrote "&lt;" sees "&lt;", the same rule as one who wrote "<". A
 // bare ampersand ("R&D", "a & b") already renders as itself and passes through
 // untouched, which keeps the committed Markdown readable.
-func prose(s string) string {
+func escapeProse(s string, blockContext bool) string {
 	var b strings.Builder
-	for i := 0; i < len(s); {
-		switch c := s[i]; {
-		case c == '`':
-			end := codeSpanEnd(s, i)
-			b.WriteString(s[i:end])
-			i = end
-		case c == '<':
-			b.WriteString("&lt;")
-			i++
-		case c == '>':
-			b.WriteString("&gt;")
-			i++
-		case c == '&' && entityRefRE.MatchString(s[i:]):
-			b.WriteString("&amp;")
-			i++
-		default:
-			b.WriteByte(c)
-			i++
-		}
+	i := 0
+	for _, r := range literalRanges(s, blockContext) {
+		escapeMarkup(&b, s[i:r.start])
+		b.WriteString(s[r.start:r.stop])
+		i = r.stop
 	}
+	escapeMarkup(&b, s[i:])
 	return b.String()
 }
 
-// codeSpanEnd returns the index just past the code span opening with the
-// backtick run at i. Per CommonMark a span closes at the next run of exactly
-// the same length; with no such run the backticks are ordinary text, and the
-// run alone is consumed.
-func codeSpanEnd(s string, i int) int {
-	n := backtickRun(s, i)
-	for j := i + n; j < len(s); {
-		if s[j] != '`' {
-			j++
+// literalRanges returns the regions of s a CommonMark parser treats as literal
+// text: the contents of code spans, and — in block context only — of fenced and
+// indented code blocks. The ranges are sorted and do not overlap.
+//
+// The parse is what decides. A hand-rolled backtick scanner has no model of
+// block structure or of backslash escapes, so it reads an escaped "\`" as a
+// delimiter and lets a span run across a paragraph break — two ways to declare
+// raw HTML literal that a real parser never would (#37).
+//
+// A code fence's info string is not returned: it is an attribute of the block
+// rather than text on the page, so escaping it costs nothing and keeps an
+// unclosed fence from carrying a tag on its opening line.
+func literalRanges(s string, blockContext bool) []byteRange {
+	src := []byte(s)
+	var out []byteRange
+	appendSegments := func(segs *text.Segments) {
+		for i := 0; i < segs.Len(); i++ {
+			seg := segs.At(i)
+			out = append(out, byteRange{seg.Start, seg.Stop})
+		}
+	}
+	// Walk never returns an error: the callback below returns none.
+	_ = ast.Walk(mdParser.Parse(text.NewReader(src)), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch node := n.(type) {
+		case *ast.CodeSpan:
+			for c := node.FirstChild(); c != nil; c = c.NextSibling() {
+				if t, ok := c.(*ast.Text); ok {
+					out = append(out, byteRange{t.Segment.Start, t.Segment.Stop})
+				}
+			}
+		case *ast.FencedCodeBlock:
+			if blockContext {
+				appendSegments(node.Lines())
+			}
+		case *ast.CodeBlock:
+			if blockContext {
+				appendSegments(node.Lines())
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+
+	sort.Slice(out, func(i, j int) bool { return out[i].start < out[j].start })
+	merged := out[:0]
+	prev := 0
+	for _, r := range out {
+		if r.start < prev {
 			continue
 		}
-		r := backtickRun(s, j)
-		if r == n {
-			return j + n
-		}
-		j += r
+		merged = append(merged, r)
+		prev = r.stop
 	}
-	return i + n
+	return merged
 }
 
-func backtickRun(s string, i int) int {
-	n := 0
-	for i+n < len(s) && s[i+n] == '`' {
-		n++
+func escapeMarkup(b *strings.Builder, s string) {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '<':
+			b.WriteString("&lt;")
+		case c == '>':
+			b.WriteString("&gt;")
+		case c == '&' && entityRefRE.MatchString(s[i:]):
+			b.WriteString("&amp;")
+		default:
+			b.WriteByte(c)
+		}
 	}
-	return n
 }
 
 // oneLine collapses a value onto a single line for use in a heading, a list
