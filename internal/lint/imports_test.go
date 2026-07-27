@@ -696,6 +696,83 @@ entities:
 	}
 }
 
+// TestImports_EntityPositionReferenceCountsAsUsingTheImport pins R2-3: an
+// import referenced only from an entity position (subtypeOf or
+// relationship.entity) used to get both the "not supported in an entity
+// position" error and a "never referenced — drop it" completeness warning for
+// the same import — contradictory advice, since dropping the import does not
+// fix the unsupported reference. reportQualifiedEntityRefs already knows the
+// scope was reached for; runImports must count that as use, the same as an
+// attribute type would.
+func TestImports_EntityPositionReferenceCountsAsUsingTheImport(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{"docs/payments.modelith.yaml": paymentsModel}
+	src := `kind: DomainModel
+version: v1
+imports:
+  - "./payments.modelith.yaml"
+entities:
+  Card:
+    definition: A store card.
+    subtypeOf: payments.Invoice
+`
+	res, err := Run(importerPath, []byte(src), files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the entity-position error is expected: no "/imports/0 ... never
+	// referenced" finding alongside it.
+	assertFindings(t, importFindings(res.Findings), []wantFinding{{
+		SeverityError, CategoryStructural, "/entities/Card/subtypeOf",
+		"is a cross-model reference, which is not supported in an entity position",
+	}})
+}
+
+// TestRun_QualifiedEntityReferenceReportedOnUnsupportedVersion pins R2-4:
+// reportQualifiedEntityRefs runs inside runStructural, but used to run only
+// after the unsupported-version early return, so a cross-model reference in an
+// entity position went unreported on a document whose version this build
+// doesn't understand — only the version error surfaced. runSemantic and
+// runSubtypes independently skip a value matching the same pattern, trusting
+// that reportQualifiedEntityRefs already reported it; an early return that
+// skips the call makes that trust false. It must run regardless of whether the
+// version is supported.
+func TestRun_QualifiedEntityReferenceReportedOnUnsupportedVersion(t *testing.T) {
+	t.Parallel()
+
+	src := `kind: DomainModel
+version: v99
+entities:
+  Card:
+    definition: A store card.
+    subtypeOf: payments.Card
+    relationships:
+      - entity: payments.Card
+        cardinality: "1:1"
+`
+	res, err := Run(importerPath, []byte(src), fakeFiles{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []wantFinding{
+		{SeverityError, CategoryStructural, "/entities/Card/relationships/0/entity",
+			"is a cross-model reference, which is not supported in an entity position"},
+		{SeverityError, CategoryStructural, "/entities/Card/subtypeOf",
+			"is a cross-model reference, which is not supported in an entity position"},
+	}
+	var got []Finding
+	for _, f := range res.Findings {
+		if f.Path == want[0].path || f.Path == want[1].path {
+			got = append(got, f)
+		}
+	}
+	assertFindings(t, got, want)
+	if !res.HasBlocking(false) {
+		t.Error("an unsupported cross-model entity reference must block even on an unsupported version")
+	}
+}
+
 // TestRun_QualifiedEntityReferenceDoesNotGateTheImportsLayer pins that two
 // unrelated mistakes are reported in one run. The cross-model entity reference
 // used to count as a structural failure, which skipped the imports layer

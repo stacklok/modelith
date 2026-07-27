@@ -63,8 +63,11 @@ type importedModel struct {
 // type against them, and reports an import nothing references.
 //
 // modelPath is the path of the model being linted; imports resolve relative to
-// its directory.
-func runImports(modelPath string, m *model.Model, files Files, res *Result) {
+// its directory. entityScopes are the scopes named by a cross-model reference
+// in an entity position (relationship.entity, subtypeOf) — unsupported there,
+// but still a real reference: an import bound to one of them is not also
+// reported as unreferenced (see reportQualifiedEntityRefs).
+func runImports(modelPath string, m *model.Model, files Files, res *Result, entityScopes map[string]bool) {
 	byScope, claimed := loadImports(modelPath, m, files, res)
 	used := checkQualifiedTypes(m, byScope, claimed, res)
 	// An unreferenced import is a completeness finding, alongside the unused
@@ -72,7 +75,7 @@ func runImports(modelPath string, m *model.Model, files Files, res *Result) {
 	// nothing uses. Sharing their category means sharing their promotion under
 	// --completeness error.
 	for _, scope := range sortedMapKeys(byScope) {
-		if used[scope] {
+		if used[scope] || entityScopes[scope] {
 			continue
 		}
 		imp := byScope[scope]
@@ -305,25 +308,31 @@ func malformedRefReason(typ string) string {
 }
 
 // reportQualifiedEntityRefs reports a cross-model reference in an entity
-// position — relationship.entity or subtypeOf — and returns the instance paths
-// it reported, so the schema's own finding for the same value is suppressed.
+// position — relationship.entity or subtypeOf. It returns the instance paths
+// it reported, so the schema's own finding for the same value is suppressed,
+// and the scopes those references named, so an import that exists to support
+// one of them is not also reported as unreferenced (runImports) even though no
+// attribute type resolves it.
 //
 // Both fields carry pattern ^[A-Z][A-Za-z0-9]+$, so "payments.Card" already
 // fails validation with a message about a pattern. This says what is actually
 // wrong, in the spirit of the unsupported-version check. Cross-model entity
 // references are deferred, not planned against: ADR-0010 records why.
-func reportQualifiedEntityRefs(inst any, res *Result) map[string]bool {
-	reported := map[string]bool{}
+func reportQualifiedEntityRefs(inst any, res *Result) (reported map[string]bool, scopes map[string]bool) {
+	reported = map[string]bool{}
+	scopes = map[string]bool{}
 	doc, ok := inst.(map[string]any)
 	if !ok {
-		return reported
+		return reported, scopes
 	}
 	entities, ok := doc["entities"].(map[string]any)
 	if !ok {
-		return reported
+		return reported, scopes
 	}
 	report := func(path, value string) {
 		reported[path] = true
+		scope, _, _ := strings.Cut(value, ".")
+		scopes[scope] = true
 		res.Findings = append(res.Findings, Finding{
 			Severity: SeverityError,
 			Category: CategoryStructural,
@@ -356,5 +365,5 @@ func reportQualifiedEntityRefs(inst any, res *Result) map[string]bool {
 			}
 		}
 	}
-	return reported
+	return reported, scopes
 }

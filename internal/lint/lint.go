@@ -88,7 +88,7 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 	}
 
 	// Layer 1: structural validation against the JSON Schema.
-	structuralOK := runStructural(src, res)
+	structuralOK, entityScopes := runStructural(src, res)
 
 	// If it does not even parse into our typed model, stop — semantic and
 	// completeness checks need a model to work with. The structural layer has
@@ -117,7 +117,7 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 	// in an entity position is not one of those rejections (see runStructural),
 	// so it does not take the imports layer down with it.
 	if structuralOK {
-		runImports(path, m, files, res)
+		runImports(path, m, files, res, entityScopes)
 	}
 	runRelationshipShape(m, res)
 	runSubtypes(m, res)
@@ -144,8 +144,11 @@ func Structural(data []byte) []Finding {
 // runStructural validates against the JSON Schema. Returns true if the schema
 // accepted the document — which the cross-model entity references reported here
 // do not affect, since they are a supported-feature limit rather than a shape
-// the imports list depends on.
-func runStructural(data []byte, res *Result) bool {
+// the imports list depends on — plus the scopes those references named, so the
+// imports layer can tell an import that exists to support one of them from one
+// genuinely unreferenced (runSemantic and runSubtypes rely on every such
+// reference having been reported here; see reportQualifiedEntityRefs).
+func runStructural(data []byte, res *Result) (ok bool, entityScopes map[string]bool) {
 	jsonBytes, err := yaml.YAMLToJSON(data)
 	if err != nil {
 		res.Findings = append(res.Findings, Finding{
@@ -153,7 +156,7 @@ func runStructural(data []byte, res *Result) bool {
 			Category: CategoryStructural,
 			Message:  fmt.Sprintf("not valid YAML: %v", err),
 		})
-		return false
+		return false, nil
 	}
 
 	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonBytes))
@@ -163,7 +166,7 @@ func runStructural(data []byte, res *Result) bool {
 			Category: CategoryStructural,
 			Message:  fmt.Sprintf("could not decode document: %v", err),
 		})
-		return false
+		return false, nil
 	}
 
 	// Dispatch on the declared format version. modelith — not the schema — is
@@ -184,7 +187,13 @@ func runStructural(data []byte, res *Result) bool {
 					Message: fmt.Sprintf("unsupported schema version %q; this modelith supports: %s "+
 						"(upgrade modelith, or set a supported version)", v, strings.Join(schema.SupportedVersions(), ", ")),
 				})
-				return false
+				// A cross-model entity reference is reported here regardless of
+				// whether the version is one this build understands: runSemantic and
+				// runSubtypes skip it on the assumption it was, and an early return
+				// before this call would leave it unreported instead of just
+				// unvalidated.
+				_, entityScopes := reportQualifiedEntityRefs(inst, res)
+				return false, entityScopes
 			}
 		}
 	}
@@ -196,7 +205,7 @@ func runStructural(data []byte, res *Result) bool {
 			Category: CategoryStructural,
 			Message:  fmt.Sprintf("internal: %v", err),
 		})
-		return false
+		return false, nil
 	}
 
 	// Say what a cross-model entity reference actually is before the schema
@@ -205,22 +214,22 @@ func runStructural(data []byte, res *Result) bool {
 	// counted against the document's structural validity: a broken import in the
 	// same file is an unrelated mistake, and holding the imports layer back
 	// until this one is fixed would hide it.
-	qualified := reportQualifiedEntityRefs(inst, res)
+	qualified, entityScopes := reportQualifiedEntityRefs(inst, res)
 
 	before := len(res.Findings)
 	if err := sch.Validate(inst); err != nil {
 		if ve, ok := err.(*jsonschema.ValidationError); ok {
 			collectLeaves(ve, res, qualified)
-			return len(res.Findings) == before
+			return len(res.Findings) == before, entityScopes
 		}
 		res.Findings = append(res.Findings, Finding{
 			Severity: SeverityError,
 			Category: CategoryStructural,
 			Message:  err.Error(),
 		})
-		return false
+		return false, entityScopes
 	}
-	return true
+	return true, entityScopes
 }
 
 func collectLeaves(e *jsonschema.ValidationError, res *Result, skip map[string]bool) {
