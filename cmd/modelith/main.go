@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/stacklok/modelith/internal/deps"
 	"github.com/stacklok/modelith/internal/lint"
 	"github.com/stacklok/modelith/internal/model"
 	"github.com/stacklok/modelith/internal/provenance"
@@ -83,8 +86,108 @@ func rootCmd() *cobra.Command {
 		SilenceErrors: true,
 		Version:       buildVersion(),
 	}
-	root.AddCommand(lintCmd(), renderCmd(), schemaCmd())
+	root.AddCommand(lintCmd(), renderCmd(), schemaCmd(), depsCmd())
 	return root
+}
+
+// ---- deps ----
+
+func depsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "deps",
+		Short: "Manage models vendored from other repositories",
+		Long: strings.TrimSpace(`
+Manage models vendored from other repositories.
+
+A vendored model is a copy of a model whose home is elsewhere, committed here
+and marked with a provenance header. Commands in this group are the only ones
+that use the network; lint and render never do.`),
+	}
+	cmd.AddCommand(depsImportCmd())
+	return cmd
+}
+
+func depsImportCmd() *cobra.Command {
+	var ref string
+	cmd := &cobra.Command{
+		Use:   "import <url> [dir]",
+		Short: "Vendor a model from another repository",
+		Long: strings.TrimSpace(`
+Vendor a model from another repository into this one.
+
+<url> is the address of the file as it appears in a browser on github.com. The
+copy is written into [dir] (the working directory by default) with a provenance
+header recording where it came from, and is verified against that header by
+every later lint.
+
+Fetching is delegated to the gh CLI, which must be installed and authenticated.
+The imports list of the model that will reference this copy is yours to edit;
+this command prints the entry to add.`),
+		Example: strings.TrimSpace(`
+  modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml
+  modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml docs/
+  modelith deps import --ref v2.1.0 https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml`),
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir := "."
+			if len(args) == 2 {
+				dir = args[1]
+			}
+			info, err := os.Stat(dir)
+			if err != nil {
+				return fmt.Errorf("%s: %w", dir, err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("%s is not a directory — the destination is a directory, and the filename comes from the origin", dir)
+			}
+
+			res, err := deps.Import(cmd.Context(), deps.Options{
+				URL: args[0],
+				Dir: dir,
+				Ref: ref,
+				Now: time.Now(),
+			})
+			if err != nil {
+				return err
+			}
+
+			printImportResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), res)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&ref, "ref", "", "ref to fetch, overriding the one in the URL (a tag pins the copy)")
+	return cmd
+}
+
+// printImportResult reports a completed import: what was written, the entry to
+// paste, whether the fetched model reaches for models of its own, and the trust
+// warning ADR-0014 requires.
+//
+// The warning prints and does not prompt. An agent usually drives this command,
+// so a prompt is either auto-answered theatre or a wedged non-interactive run.
+// The fetched file is inert until it is named in an imports list, and this
+// command deliberately does not do that — the manual step is the real gate.
+func printImportResult(out, errOut io.Writer, res *deps.Result) {
+	verb := "wrote"
+	if res.Replaced {
+		verb = "replaced"
+	}
+	name := filepath.Base(res.Path)
+	fmt.Fprintf(out, "%s %s at %s\n", verb, res.Path, res.Header.Commit)
+	fmt.Fprintf(out, "\nAdd it to the model that references it, as a path relative to that model:\n\n"+
+		"  imports:\n    - ./%s\n", name)
+	if n := len(res.TheirImports); n > 0 {
+		declares := fmt.Sprintf("declares %d imports of its own", n)
+		if n == 1 {
+			declares = "declares an import of its own"
+		}
+		fmt.Fprintf(out, "\nNote: %s %s (%s).\n"+
+			"modelith vendors one file, not a dependency tree, and resolution is not\n"+
+			"transitive — if you need items from those models, import them directly.\n",
+			name, declares, strings.Join(res.TheirImports, ", "))
+	}
+	fmt.Fprint(errOut, "\nWarning: a vendored model is untrusted content that will be rendered\n"+
+		"into your published Markdown. Only vendor from sources you trust.\n")
 }
 
 // ---- lint ----

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stacklok/modelith/internal/deps"
 	"github.com/stacklok/modelith/internal/provenance"
 )
 
@@ -306,6 +307,102 @@ func TestRenderCheckSkipsAVendoredCopy(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "m.modelith.md")); err != nil {
 		t.Errorf("rendering by name wrote nothing: %v", err)
+	}
+}
+
+// TestDepsImportOutput covers what a completed import tells the user. All three
+// parts are load-bearing: the snippet is the second, manual step this command
+// deliberately leaves to the user, the note is the whole answer to
+// non-transitive vendoring, and the warning is what ADR-0014 requires in place
+// of hardening the renderer further.
+func TestDepsImportOutput(t *testing.T) {
+	res := &deps.Result{
+		Path:   filepath.Join("docs", "payments.modelith.yaml"),
+		Header: &provenance.Header{Commit: "4f2c1e9"},
+	}
+
+	t.Run("a leaf model", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		printImportResult(&out, &errOut, res)
+		for _, want := range []string{"wrote docs/payments.modelith.yaml at 4f2c1e9", "imports:", "- ./payments.modelith.yaml"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("stdout does not contain %q:\n%s", want, out.String())
+			}
+		}
+		if strings.Contains(out.String(), "dependency tree") {
+			t.Error("a leaf model got the transitive-imports note")
+		}
+		if !strings.Contains(errOut.String(), "Only vendor from sources you trust") {
+			t.Errorf("the trust warning is missing from stderr:\n%s", errOut.String())
+		}
+	})
+
+	t.Run("a model with imports of its own", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		chained := *res
+		chained.TheirImports = []string{"./ledger.modelith.yaml"}
+		printImportResult(&out, &errOut, &chained)
+		for _, want := range []string{
+			"declares an import of its own (./ledger.modelith.yaml)",
+			"resolution is not",
+			"import them directly",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("stdout does not contain %q:\n%s", want, out.String())
+			}
+		}
+	})
+
+	t.Run("a replaced copy says so", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		replaced := *res
+		replaced.Replaced = true
+		printImportResult(&out, &errOut, &replaced)
+		if !strings.HasPrefix(out.String(), "replaced ") {
+			t.Errorf("stdout does not report the replacement:\n%s", out.String())
+		}
+	})
+}
+
+// TestDepsImportRejectsBadArguments covers the paths that fail before any fetch
+// is attempted, so they need no network and no gh.
+func TestDepsImportRejectsBadArguments(t *testing.T) {
+	dir := t.TempDir()
+	file := writeTemp(t, dir, "not-a-dir", "x")
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "a host modelith cannot fetch from",
+			args: []string{"deps", "import", "https://gitlab.com/acme/billing/-/blob/main/m.modelith.yaml", dir},
+			want: "github.com/stacklok/modelith/issues",
+		},
+		{
+			name: "a URL that names no file",
+			args: []string{"deps", "import", "https://github.com/acme/billing", dir},
+			want: "not a GitHub file URL",
+		},
+		{
+			name: "a destination that is a file",
+			args: []string{"deps", "import", "https://github.com/acme/billing/blob/main/m.modelith.yaml", file},
+			want: "is not a directory",
+		},
+		{
+			name: "a destination that does not exist",
+			args: []string{"deps", "import", "https://github.com/acme/billing/blob/main/m.modelith.yaml", filepath.Join(dir, "nope")},
+			want: "no such file or directory",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := run(t, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+		})
 	}
 }
 
