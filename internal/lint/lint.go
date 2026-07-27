@@ -192,7 +192,7 @@ func runStructural(data []byte, res *Result) (ok bool, entityScopes map[string]b
 				// runSubtypes skip it on the assumption it was, and an early return
 				// before this call would leave it unreported instead of just
 				// unvalidated.
-				_, entityScopes := reportQualifiedEntityRefs(inst, res)
+				_, entityScopes = reportQualifiedEntityRefs(inst, res)
 				return false, entityScopes
 			}
 		}

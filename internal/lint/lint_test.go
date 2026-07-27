@@ -133,6 +133,37 @@ entities:
 	}
 }
 
+// TestRunStructural_UnsupportedVersionReturnsEntityScopes locks down the named
+// return runStructural hands back on the unsupported-version early-return
+// path (lint.go:195). That line used to declare a new, block-scoped
+// entityScopes with `:=`, shadowing the function's named return instead of
+// assigning it; the explicit `return false, entityScopes` right after still
+// returned the correct (shadowed) value, so the bug was latent, not live —
+// but it would have gone silently wrong the moment that return became a bare
+// `return`, which is exactly the idiom named returns invite. Calling
+// runStructural directly (white-box, same package) is the only way to
+// observe this return value: Run() never reaches this path with structuralOK
+// true, so nothing downstream currently consumes it.
+func TestRunStructural_UnsupportedVersionReturnsEntityScopes(t *testing.T) {
+	src := `
+kind: DomainModel
+version: v99
+entities:
+  Ticket:
+    definition: A parking ticket.
+    subtypeOf: payments.Invoice
+`
+	res := &Result{}
+	ok, entityScopes := runStructural([]byte(src), res)
+	if ok {
+		t.Fatal("expected ok=false for an unsupported version")
+	}
+	want := map[string]bool{"payments": true}
+	if len(entityScopes) != len(want) || !entityScopes["payments"] {
+		t.Fatalf("expected entityScopes %+v from the entity-position reference, got %+v", want, entityScopes)
+	}
+}
+
 func TestUndefinedRelationshipTargetIsError(t *testing.T) {
 	src := `
 kind: DomainModel
