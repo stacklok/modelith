@@ -60,8 +60,14 @@ document:
 
 - **Completeness gaps in it are not reported**, so `completeness: error` cannot
   fail your build over a model you did not write.
-- **`check-rendered` skips it**, so you are not asked to commit a `.md` whose
-  home is another repository.
+- **`check-rendered` skips it when you have not committed a `.md` for it**, so
+  you are not asked to commit one whose home is another repository. If you *do*
+  commit one — the way a deep link into a vendored model's Markdown gets a
+  target — it is checked for staleness from then on.
+- **`check-rendered` also skips a copy this modelith cannot render**, such as
+  one written against a newer schema version. `lint` reports that, and repeating
+  it here would fail your build twice over one problem you cannot fix in your
+  own repository.
 
 Everything else still applies. A vendored file that is not a valid domain
 model, or that has been edited since it was imported, fails the build — both

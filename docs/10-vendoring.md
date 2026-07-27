@@ -90,10 +90,16 @@ Two things change, and nothing else:
 valid domain model breaks your build, and that is your problem to solve — by
 fetching a different ref, or by talking to whoever owns it.
 
-`modelith render --check` skips vendored files too: their rendered Markdown
-belongs to their home repository, so you are not asked to commit one.
-Rendering a vendored model by naming it still works, which is how a deep link
-into it gets something to point at.
+`modelith render --check` skips a vendored file that has no committed `.md`:
+its rendered Markdown belongs to its home repository, so you are not asked to
+commit one. Rendering a vendored model by naming it still works, which is how a
+deep link into it gets something to point at — and once you commit that `.md`,
+`--check` treats it like any other and tells you when refreshing the copy has
+left it stale.
+
+The one thing `--check` will not do is fail over a vendored model this modelith
+cannot render at all — one written against a newer schema version, say. It says
+it skipped it and moves on; `modelith lint` is where that is reported, once.
 
 ## Keeping the copy honest
 

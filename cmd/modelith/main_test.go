@@ -273,21 +273,26 @@ func TestRenderCheckDetectsDrift(t *testing.T) {
 	}
 }
 
-// TestRenderCheckSkipsAVendoredCopy covers the half of ADR-0015 that lives in
-// the CLI: a vendored model has no committed .md here, and --check runs over
-// globs, so demanding one would fail a build over somebody else's document.
-// Rendering it by name still works — that is what a deep link points at.
-func TestRenderCheckSkipsAVendoredCopy(t *testing.T) {
-	dir := t.TempDir()
-	header := "# modelith-vendored: " + provenance.Banner + "\n" +
+// vendorHeader stamps content the way `deps import` does, so a test fixture is
+// a vendored copy that verifies against its own digest.
+func vendorHeader(content string) string {
+	return "# modelith-vendored: " + provenance.Banner + "\n" +
 		"# modelith-fetch: git\n" +
 		"# modelith-origin: https://github.com/stacklok/some-repo\n" +
 		"# modelith-path: docs/m.modelith.yaml\n" +
 		"# modelith-ref: main\n" +
 		"# modelith-commit: 4f2c1e9\n" +
 		"# modelith-imported: 2026-07-27\n" +
-		"# modelith-digest: " + provenance.Digest([]byte(minimalValid)) + "\n"
-	yamlPath := writeTemp(t, dir, "m.modelith.yaml", header+minimalValid)
+		"# modelith-digest: " + provenance.Digest([]byte(content)) + "\n"
+}
+
+// TestRenderCheckSkipsAVendoredCopy covers the half of ADR-0015 that lives in
+// the CLI: a vendored model has no committed .md here, and --check runs over
+// globs, so demanding one would fail a build over somebody else's document.
+// Rendering it by name still works — that is what a deep link points at.
+func TestRenderCheckSkipsAVendoredCopy(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := writeTemp(t, dir, "m.modelith.yaml", vendorHeader(minimalValid)+minimalValid)
 
 	// No .md exists at all, which is the state a fresh `deps import` leaves.
 	out, err := run(t, "render", "--check", yamlPath)
@@ -307,6 +312,65 @@ func TestRenderCheckSkipsAVendoredCopy(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "m.modelith.md")); err != nil {
 		t.Errorf("rendering by name wrote nothing: %v", err)
+	}
+}
+
+// TestRenderCheckChecksACommittedVendoredMarkdown pins the other side of the
+// skip: once this repository has committed a vendored model's .md — the way a
+// deep link into it gets a target — that file goes stale like any other, and
+// nothing else would say so. Skipping it unconditionally left a refreshed copy
+// with a rendered document describing the version before it.
+func TestRenderCheckChecksACommittedVendoredMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := writeTemp(t, dir, "m.modelith.yaml", vendorHeader(minimalValid)+minimalValid)
+
+	if _, err := run(t, "render", yamlPath); err != nil {
+		t.Fatalf("rendering a vendored model by name failed: %v", err)
+	}
+	out, err := run(t, "render", "--check", yamlPath)
+	if err != nil {
+		t.Fatalf("--check failed on a freshly rendered copy: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, "up to date") {
+		t.Errorf("output does not report the check: %q", out)
+	}
+
+	writeTemp(t, dir, "m.modelith.md", "stale content\n")
+	if _, err := run(t, "render", "--check", yamlPath); err == nil {
+		t.Fatal("a stale committed .md for a vendored copy passed --check")
+	} else if !strings.Contains(err.Error(), "out of date") {
+		t.Fatalf("expected an out-of-date error, got: %v", err)
+	}
+}
+
+// TestRenderCheckStaysQuietOnAVendoredCopyItCannotRender pins that --check does
+// not turn this repository's build red over a defect in a document it does not
+// own. A copy fetched from a repository on a newer modelith can be unreadable
+// here; `modelith lint` reports that, once, and --check has nothing to add
+// because there is no .md this repository could regenerate.
+func TestRenderCheckStaysQuietOnAVendoredCopyItCannotRender(t *testing.T) {
+	dir := t.TempDir()
+	future := strings.Replace(minimalValid, "version: v1", "version: v99", 1)
+	if future == minimalValid {
+		t.Fatal("fixture did not declare a version to replace")
+	}
+	yamlPath := writeTemp(t, dir, "m.modelith.yaml", vendorHeader(future)+future)
+	writeTemp(t, dir, "m.modelith.md", "a rendered form from a modelith that understood it\n")
+
+	out, err := run(t, "render", "--check", yamlPath)
+	if err != nil {
+		t.Fatalf("--check failed on an unrenderable vendored copy: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, "cannot render") {
+		t.Errorf("output does not say why it was skipped: %q", out)
+	}
+
+	// The same file, owned rather than vendored, is still this repository's
+	// problem and still fails.
+	ownPath := writeTemp(t, dir, "own.modelith.yaml", future)
+	writeTemp(t, dir, "own.modelith.md", "whatever\n")
+	if _, err := run(t, "render", "--check", ownPath); err == nil {
+		t.Fatal("an unrenderable model this repository owns passed --check")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -309,20 +310,43 @@ func renderCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("%s: %w", in, err)
 			}
+			target := out
+			if target == "" {
+				target = defaultOut(in)
+			}
+
 			// A vendored model's rendered form belongs to its home repository,
 			// so it arrives with no committed .md and no obligation to carry
 			// one. --check runs over globs, and demanding one here would make
 			// this repository regenerate somebody else's document every time
 			// their model moved (ADR-0015). Naming the file to render it still
 			// renders it; that is how a deep link into a vendored model's .md
-			// gets something to point at.
-			if check && provenance.Present(data) {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s is a vendored copy — skipped\n", in)
+			// gets something to point at — and once such an .md is committed, it
+			// goes stale like any other, so from then on --check does check it.
+			//
+			// What stays skipped is everything the origin owns rather than this
+			// repository: a copy this build cannot render at all — a newer schema
+			// version, a shape this binary does not know — is not a --check
+			// failure, because there is nothing here to fix. `modelith lint`
+			// reports it, loudly and once.
+			vendored := provenance.Present(data)
+			skipVendored := func(tail string) error {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s is a vendored copy %s\n", in, tail)
 				return nil
 			}
+			unrenderable := fmt.Sprintf("this modelith cannot render — skipped (run `modelith lint %s` for details)", in)
+			if check && vendored {
+				if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) {
+					return skipVendored("with no committed " + filepath.Base(target) + " — skipped")
+				}
+			}
+
 			// Validate against the schema first so a malformed file fails with a
 			// friendly, located error rather than the raw strict-YAML parse error.
 			if findings := lint.Structural(data); len(findings) > 0 {
+				if check && vendored {
+					return skipVendored(unrenderable)
+				}
 				var b strings.Builder
 				fmt.Fprintf(&b, "%s is not a valid domain model — run `modelith lint %s` for details:", in, in)
 				for _, f := range findings {
@@ -336,6 +360,9 @@ func renderCmd() *cobra.Command {
 			}
 			m, err := model.Parse(data)
 			if err != nil {
+				if check && vendored {
+					return skipVendored(unrenderable)
+				}
 				return err
 			}
 
@@ -353,10 +380,6 @@ func renderCmd() *cobra.Command {
 				return err
 			}
 
-			target := out
-			if target == "" {
-				target = defaultOut(in)
-			}
 			outDir, err := filepath.Abs(filepath.Dir(target))
 			if err != nil {
 				return fmt.Errorf("resolving %s: %w", target, err)
