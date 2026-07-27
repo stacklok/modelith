@@ -123,6 +123,25 @@ Follow the format exactly (see the schema reference). Key conventions:
   sentence: it is the only label drawn on the diagram line, so prose there
   collides with neighbouring lines and warns. Put the explanation in `note`.
   `ownership` needs no label — it draws as a solid vs dashed line.
+- **`shared: true`** (top level) marks a model other models are expected to
+  import. It relaxes the "defined but never referenced" completeness checks
+  for *this* model's own enums and glossary terms — the references that
+  justify them live in files this model can't see — but not the
+  entity-invariant or scenario-coverage checks, which are about gaps in this
+  model itself. Mark a pure-vocabulary model (one that exists to be imported,
+  not used on its own) `shared: true` so it can pass `--completeness error`.
+- **`imports`** (top level) lists other model files this one references, each
+  a path relative to this file: a bare string (`./payments.modelith.yaml`,
+  whose filename gives the scope — `payments`) or `{scope, path}` to name the
+  scope explicitly. Reference an item from an imported model as `scope.Name`
+  in an attribute `type` — **only there**; `relationship.entity` and
+  `subtypeOf` cannot be qualified this way (not supported yet, and the linter
+  says so explicitly if you try). An import must resolve inside the
+  repository holding this model (the nearest ancestor directory with a `.git`
+  entry, or this model's own directory if there is none) and name a
+  readable, supported-version domain model, or it's a lint error. An import
+  nothing references is a completeness warning: drop it, or reference one of
+  its enums.
 - **`glossary`** (top level) defines non-entity vocabulary — roles like `Owner`,
   states, domain nouns — as `Term: "definition"`. Define any role or actor name
   here; an undefined role warns, and an unused glossary term warns.
@@ -132,8 +151,15 @@ Follow the format exactly (see the schema reference). Key conventions:
   is not a valid type; use the PascalCase name of an enum you defined under
   `enums`.
 - **Attribute `type`** is a primitive in **lowercase** (`string`, `integer`,
-  `boolean`, `timestamp`) or the **PascalCase name of a defined enum**. A
-  PascalCase type that names no enum warns. Mark computed values with
+  `boolean`, `timestamp`), the **PascalCase name of a defined enum**, or a
+  **cross-model reference** — `scope.Name`, naming an enum in a model bound by
+  `imports` (see above). A PascalCase type that names no enum warns; a
+  `scope.Name` type whose scope isn't imported, or that names no enum in the
+  model it resolves to, is an **error**. **A dot anywhere in `type` is
+  reserved for a cross-model reference** — `decimal(10.2)`,
+  `google.protobuf.Timestamp`, and any other dotted string that isn't a
+  well-formed `scope.Name` is a lint error, not a primitive you can invent;
+  there is no dotted primitive form in this format. Mark computed values with
   `derived: true` plus a `derivation:` (required when derived).
 - **`actions`** items are either a bare string (`create`) or a structured object
   `{name, actor?, preserves?, description?}`. Use the object form to tie an

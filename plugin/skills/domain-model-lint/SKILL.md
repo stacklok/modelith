@@ -38,7 +38,9 @@ the flag.
 ## Interpret the three layers
 
 - **Structural (error).** The file violates the JSON Schema — wrong type,
-  missing required field, bad `cardinality`. Must be fixed; the model won't
+  missing required field, bad `cardinality` — or names a cross-model reference
+  (`scope.Name`) in `relationship.entity` or `subtypeOf`, which is not
+  supported anywhere but an attribute `type`. Must be fixed; the model won't
   parse cleanly otherwise.
 - **Semantic (error or warning).** Errors (always block, flag-independent): a
   relationship points at an entity that doesn't exist; a scenario's
@@ -46,18 +48,31 @@ the flag.
   or top-level `invariants` entry declares; the same invariant id is declared
   twice (entity-level and top-level invariants share one id namespace); reciprocal cardinalities
   that aren't inverses; reciprocal declarations that both claim
-  `ownership: owned`. Warnings: a backticked term resolves to no entity, role,
-  or actor; an action `actor` that's neither an entity nor a glossary term; a
-  PascalCase attribute `type` that names no defined enum — usually a typo or a
-  concept that was never named; a relationship `role` written as prose, which
-  belongs in `note`; an ambiguous reciprocal pairing, where one end declares the
-  same relationship twice and the other declares it back. Decide which it is and
-  propose the fix.
+  `ownership: owned`; an `imports` entry that's absolute, unreadable, not a
+  domain model, binds a scope another entry already bound, resolves outside
+  the repository holding this model, or is a bare path whose filename yields
+  no valid scope slug; an attribute `type` containing a dot that isn't a
+  well-formed `scope.Name` (a dot is always reserved for a cross-model
+  reference — `decimal(10.2)` and `google.protobuf.Timestamp` are errors, not
+  primitives); a `scope.Name` type whose scope no import binds, or that names
+  no enum in the model it resolves to. Warnings: a backticked term resolves to
+  no entity, role, or actor; an action `actor` that's neither an entity nor a
+  glossary term; a PascalCase attribute `type` that names no defined enum —
+  usually a typo or a concept that was never named; a relationship `role`
+  written as prose, which belongs in `note`; an ambiguous reciprocal pairing,
+  where one end declares the same relationship twice and the other declares it
+  back. Decide which it is and propose the fix.
 - **Completeness (advisory warning).** Gaps, not bugs: an entity with no
-  invariants, an entity no scenario exercises, a glossary term defined but never
-  referenced, or an enum no attribute uses. These are what `--completeness error`
-  promotes to blocking. For each, ask whether it's a real gap (write the missing
-  invariant or scenario) or genuinely fine.
+  invariants, an entity no scenario exercises, a glossary term defined but
+  never referenced, an enum no attribute uses, or an import nothing
+  references. `shared: true` on the model being linted relaxes the two
+  vocabulary-only checks (the unused glossary term and unused enum) — it does
+  not relax the invariant or scenario-coverage checks, and it does nothing for
+  an unreferenced import (that check is about *this* model's own `imports`,
+  not about being imported). These are what `--completeness error` promotes to
+  blocking. For each, ask whether it's a real gap (write the missing invariant
+  or scenario, or drop the unused import) or genuinely fine — a
+  `shared: true` model in particular.
 
 ## How to report back
 

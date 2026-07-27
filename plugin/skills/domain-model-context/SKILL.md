@@ -27,6 +27,9 @@ relationships, and don't violate invariants.
    - the **canonical names** — use `Project`, never "workspace" or "container";
    - the **relationships and cardinality** — what owns what;
    - the **invariants** — rules your code must not break.
+4. If it has an `imports:` list, its `scope.Name` references (in attribute
+   `type` values) name vocabulary that lives in the imported file, not this
+   one — load that file too before treating a `scope.Name` term as unknown.
 
 ## How to apply it while coding
 
