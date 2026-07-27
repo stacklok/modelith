@@ -169,6 +169,16 @@ rule above is about what a parser calls a tag, and none of these is one.
   `&lt;img src=q&gt;` both pass. A `{` in prose still reaches the build as an
   expression. This is unchanged from before the escaping existed — the same
   bytes reach the page as they did — but the escaping does not close it either.
+- **A prose block that leaves a code fence open.** A `definition:` of
+  ` ``` ` and then `<A onerror=alert(1)>` parses, on its own, as an unclosed
+  fenced block whose contents are code — so nothing in it is markup. In the
+  assembled document that fence pairs with the next one, which is the Mermaid
+  diagram's, and the tag lands outside any block and goes live. The field's own
+  parse is only authoritative while the field is self-contained, and an open
+  fence is exactly the case where it is not. The bytes are unchanged from before
+  the escaping existed. Refusing an unbalanced fence reads as a lint rule about
+  a malformed prose block rather than as a renderer escaping decision, and which
+  it should be is not settled here.
 - **The parser configuration is CommonMark; every reader's is GFM.** GitHub and
   Docusaurus both apply the GFM extensions, and GFM's table transformer can
   dissolve a paragraph into a table, so a CommonMark code span that spanned a

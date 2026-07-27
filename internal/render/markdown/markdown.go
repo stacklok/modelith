@@ -495,14 +495,11 @@ var mdParser = parser.NewParser(
 // byteRange is a half-open [start, stop) region of a prose string.
 type byteRange struct{ start, stop int }
 
-// linePrefix stands in, during the parse only, for the text a line-context
-// value follows on its rendered line: the "- ", "# ", "| " or "**Bold** — "
-// that always precedes it. Those bytes hold column zero, where a four-space
-// indent or a "```" run would otherwise open a code block. Parsed on its own
-// the same value can look like a code block, and a parser reports nothing
-// inside one as HTML — which would leave a tag live on a line that has no code
-// block in it. The offsets come back shifted by its length and are shifted off
-// again.
+// linePrefix stands in, during the parse only, for text a line-context value
+// follows on its rendered line — the "# " of a heading, the "| " of a table
+// cell, the "**Bold** — " of a bullet that opens with generated markup. It
+// holds column zero so the value is read as the inline content it is there.
+// The offsets come back shifted by its length and are shifted off again.
 const linePrefix = "x "
 
 // proseBlock escapes an author-written string that is emitted as its own block
@@ -559,8 +556,53 @@ func escapeProse(s string, blockContext bool) string {
 // a class attribute rather than as text, so escaping it costs nothing and keeps
 // an unclosed fence from carrying a tag on its opening line. It is also inert to
 // block structure, so escaping it cannot disturb the parse it came from.
+//
+// A line-context value is read twice, and everything either reading calls markup
+// is escaped. The two readings are both real: a value that opens a list item
+// — a scenario step, rendered as "1. " and then the step — begins a block, where
+// "</div" opens an HTML block; the same value in a heading or a table cell is
+// inline content, where it is text and a "<script>" further along the line is
+// the live tag instead. Neither reading alone covers the other, and the parse is
+// too cheap to be worth guessing which applies.
 func markupRanges(s string, blockContext bool) []byteRange {
-	src, shift := parseSource(s, blockContext)
+	out := parseMarkup(s, "")
+	if !blockContext {
+		out = append(out, parseMarkup(s, linePrefix)...)
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].start < out[j].start })
+	merged := out[:0]
+	for _, r := range out {
+		if n := len(merged); n > 0 && r.start <= merged[n-1].stop {
+			merged[n-1].stop = max(merged[n-1].stop, r.stop)
+			continue
+		}
+		merged = append(merged, r)
+	}
+	return merged
+}
+
+// parseMarkup parses s behind prefix and returns the markup it finds, as ranges
+// in s. The ranges are neither sorted nor merged; markupRanges does both, and
+// two readings of the same string can overlap.
+//
+// The trailing newline is a workaround, not a nicety. goldmark decides whether
+// a line is blank by comparing an indent measured in *columns* against the
+// line's length in *bytes*, so a final line short enough for a tab to outrun it
+// — "> \t`" — is called blank, and the fenced-code-block parser then indexes it
+// at the -1 that marks one. That panics `render` on a model that lints clean.
+// A line ending keeps the comparison honest, costs nothing (a document is
+// defined to end with one) and, appended at the end, moves no offset in s.
+// Upstream yuin/goldmark#556 fixed one path into the same -1 and v1.8.4 carries
+// that fix; this input reaches it by another, and #556's own repro still panics
+// on v1.8.4. TestRender_UnnormalisedProseDoesNotPanic guards it.
+func parseMarkup(s, prefix string) []byteRange {
+	src := prefix + s
+	if !strings.HasSuffix(src, "\n") {
+		src += "\n"
+	}
+	shift := len(prefix)
+
 	var out []byteRange
 	add := func(start, stop int) {
 		start, stop = max(start-shift, 0), min(stop-shift, len(s))
@@ -575,7 +617,7 @@ func markupRanges(s string, blockContext bool) []byteRange {
 		}
 	}
 	// Walk never returns an error: the callback below returns none.
-	_ = ast.Walk(mdParser.Parse(text.NewReader(src)), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+	_ = ast.Walk(mdParser.Parse(text.NewReader([]byte(src))), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
@@ -594,44 +636,7 @@ func markupRanges(s string, blockContext bool) []byteRange {
 		}
 		return ast.WalkContinue, nil
 	})
-
-	sort.Slice(out, func(i, j int) bool { return out[i].start < out[j].start })
-	merged := out[:0]
-	prev := 0
-	for _, r := range out {
-		if r.start < prev {
-			continue
-		}
-		merged = append(merged, r)
-		prev = r.stop
-	}
-	return merged
-}
-
-// parseSource returns the bytes to hand the parser for s and the offset its
-// reported positions carry as a result, so a range in the parse maps back to
-// s[start-shift : stop-shift].
-//
-// The trailing newline is a workaround, not a nicety. goldmark decides whether
-// a line is blank by comparing an indent measured in *columns* against the
-// line's length in *bytes*, so a final line short enough for a tab to outrun it
-// — "> \t`" — is called blank, and the fenced-code-block parser then indexes it
-// at the -1 that marks one. That panics `render` on a model that lints clean.
-// A line ending keeps the comparison honest, costs nothing (a document is
-// defined to end with one) and, appended at the end, moves no offset in s.
-// Upstream yuin/goldmark#556 fixed one path into the same -1 and v1.8.4 carries
-// that fix; this input reaches it by another, and #556's own repro still panics
-// on v1.8.4. TestRender_UnnormalisedProseDoesNotPanic guards it.
-func parseSource(s string, blockContext bool) ([]byte, int) {
-	shift := 0
-	if !blockContext {
-		s = linePrefix + s
-		shift = len(linePrefix)
-	}
-	if !strings.HasSuffix(s, "\n") {
-		s += "\n"
-	}
-	return []byte(s), shift
+	return out
 }
 
 // escapeMarkup writes s as the text it should have been. A character reference

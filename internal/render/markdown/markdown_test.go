@@ -661,6 +661,14 @@ func TestProse_EscapesHTMLOutsideCodeSpans(t *testing.T) {
 		{name: "angle-bracket link destination", in: "[click](<http://example.com/a>)", want: "[click](<http://example.com/a>)"},
 		{name: "autolink", in: "see <https://example.com> ok", want: "see <https://example.com> ok"},
 
+		// An HTML block opens on a tag that is not a complete one, and a value
+		// on a line can still begin a block: a scenario step is rendered as
+		// "1. " and then the step, so the step opens the list item's first
+		// block. Read only as inline content, "</div " is text and reaches the
+		// page live. Both readings are taken and either one is enough to escape.
+		{name: "unterminated closing tag", in: "</div ", want: "&lt;/div "},
+		{name: "unterminated open tag", in: "<pre>x", want: "&lt;pre&gt;x"},
+
 		// A backslash-escaped backtick is a literal character and opens
 		// nothing. The scanner this replaced read every backtick as a
 		// delimiter, so the tag between two of them shipped live (#37 F1).
@@ -731,6 +739,10 @@ func TestADR_0014_NoRawHTMLSurvivesRender(t *testing.T) {
 		{"unclosed span", "A trailing " + esc + " then " + tag + "."},
 		{"reference-encoded tag", "&#60;img src=x onerror=alert(1)&#62;"},
 		{"html block", "<div onclick=alert(1)>\ntext\n</div>"},
+		// An HTML block opens on a tag that never completes, and a scenario step
+		// begins its list item's first block — so this is a block opener in one
+		// position and inline text in another.
+		{"unterminated closing tag", "</div "},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
