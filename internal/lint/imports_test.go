@@ -67,6 +67,12 @@ entities:
     definition: A request for payment.
 `
 
+// chainedModel is an imported model that imports something itself — the case
+// where an unresolved item might really be one hop further away.
+const chainedModel = paymentsModel + `imports:
+  - ./payments.modelith.yaml
+`
+
 // importer builds a model that lists the given imports and types one attribute
 // with the given type. Each entry is written verbatim as a YAML sequence item,
 // so a case can use either the bare-path form or the explicit {scope, path} one.
@@ -143,6 +149,7 @@ func TestImports_Resolution(t *testing.T) {
 		"payments/payments.modelith.yaml":  paymentsModel,
 		"docs/legacy/pay-v2.modelith.yaml": paymentsModel,
 		"docs/PayMents.modelith.yaml":      paymentsModel,
+		"docs/chained.modelith.yaml":       chainedModel,
 		"docs/not-a-model.yaml":            "kind: SomethingElse\nversion: v1\n",
 	}
 
@@ -218,6 +225,27 @@ func TestImports_Resolution(t *testing.T) {
 			want: []wantFinding{{
 				SeverityError, CategorySemantic, typePath,
 				`names no enum "Nonexistent"`,
+			}},
+		},
+		{
+			// The plain case advises a typo; the chained case below advises
+			// the import. Getting the wrong one is the whole failure mode.
+			name:     "an unresolved item in a leaf model points at the name",
+			imports:  []string{`"./payments.modelith.yaml"`},
+			attrType: "payments.Nonexistent",
+			want: []wantFinding{{
+				SeverityError, CategorySemantic, typePath,
+				"check the name, or whether you meant to import a different model",
+			}},
+		},
+		{
+			name:     "an unresolved item in a model that imports others explains non-transitivity",
+			imports:  []string{"{scope: payments, path: ./chained.modelith.yaml}"},
+			attrType: "payments.Nonexistent",
+			want: []wantFinding{{
+				SeverityError, CategorySemantic, typePath,
+				`that model imports a model of its own, and resolution is not transitive: ` +
+					`if "Nonexistent" is defined in one of them, add that model to this model's ` + "`imports:`" + ` too`,
 			}},
 		},
 		{

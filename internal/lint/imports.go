@@ -272,11 +272,36 @@ func checkQualifiedTypes(m *model.Model, byScope map[string]importedModel, claim
 				broken("attribute type %q resolves to the entity %q in %q — only an enum can be referenced across models", attr.Type, item, imp.path)
 				continue
 			}
-			broken("attribute type %q names no enum %q in %q — an imported model's own imports are not reachable from here", attr.Type, item, imp.path)
+			broken("%s", unresolvedItemMessage(attr.Type, item, imp))
 		}
 	}
 	reportUnboundScopes(unbound, res)
 	return used
+}
+
+// unresolvedItemMessage explains a qualified type whose scope resolved but
+// whose item is not there.
+//
+// The interesting case is an imported model that has imports of its own: the
+// item may well be defined in one of them, and nothing about the reference site
+// says why that does not resolve. Vendoring fetches one file and resolution
+// reaches one hop (ADR-0010, ADR-0015), so the answer is always to import that
+// model here as well and give it its own scope — never to expect this one to
+// follow the chain. Saying so only when the imported model actually has imports
+// keeps the advice off the plain case, where the mistake is a typo.
+func unresolvedItemMessage(typ, item string, imp importedModel) string {
+	msg := fmt.Sprintf("attribute type %q names no enum %q in %q", typ, item, imp.path)
+	n := len(imp.model.Imports)
+	if n == 0 {
+		return msg + " — check the name, or whether you meant to import a different model"
+	}
+	theirs := fmt.Sprintf("%d models of its own", n)
+	if n == 1 {
+		theirs = "a model of its own"
+	}
+	return msg + fmt.Sprintf(
+		" — that model imports %s, and resolution is not transitive: if %q is defined in one of them, add that model to this model's `imports:` too and reference it with its own scope",
+		theirs, item)
 }
 
 // unboundScope accumulates the references to one scope no import binds, so a
