@@ -197,6 +197,11 @@ func (h *Header) validate(seen map[string]int) []Problem {
 	return problems
 }
 
+// ValidDigest reports whether s is a digest in the form a header records. A
+// caller that has already reported a malformed one uses this to skip the
+// comparison, which such a digest cannot help but fail.
+func ValidDigest(s string) bool { return digestRE.MatchString(s) }
+
 // Verify reports whether src still hashes to the digest its own header records,
 // and returns the digest src actually has.
 func (h *Header) Verify(src []byte) (ok bool, got string) {

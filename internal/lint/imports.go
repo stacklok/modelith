@@ -67,8 +67,11 @@ type importedModel struct {
 // in an entity position (relationship.entity, subtypeOf) — unsupported there,
 // but still a real reference: an import bound to one of them is not also
 // reported as unreferenced (see reportQualifiedEntityRefs).
-func runImports(modelPath string, m *model.Model, files Files, res *Result, entityScopes map[string]bool) {
-	byScope, claimed := loadImports(modelPath, m, files, res)
+//
+// vendored says the model is a copy whose home is another repository, which
+// silences the errors its imports list would raise here (see loadImports).
+func runImports(modelPath string, m *model.Model, files Files, res *Result, entityScopes map[string]bool, vendored bool) {
+	byScope, claimed := loadImports(modelPath, m, files, res, vendored)
 	used := checkQualifiedTypes(m, byScope, claimed, res)
 	// An unreferenced import is a completeness finding, alongside the unused
 	// enum and the unused glossary term: vocabulary the model declares and
@@ -96,7 +99,15 @@ func runImports(modelPath string, m *model.Model, files Files, res *Result, enti
 // list claimed at all — including entries that then failed to load — mapped to
 // the path of the first entry that claimed it. Every rejection is reported as an
 // error: an import that cannot be resolved is a broken reference, not a gap.
-func loadImports(modelPath string, m *model.Model, files Files, res *Result) (byScope map[string]importedModel, claimed map[string]string) {
+//
+// A vendored model is the exception, and it reports nothing here at all. Its
+// imports name paths in the repository it came from, which do not exist in this
+// one, so every entry would fail for a reason its authors cannot see and this
+// repository is not expected to fix. Resolution is still attempted, because two
+// vendored peers that import each other do resolve here; and every entry still
+// claims its scope, which is what keeps a reference into an import that did not
+// load from reading as a reference to nothing (see checkQualifiedTypes).
+func loadImports(modelPath string, m *model.Model, files Files, res *Result, vendored bool) (byScope map[string]importedModel, claimed map[string]string) {
 	byScope = map[string]importedModel{}
 	claimed = map[string]string{}
 	if len(m.Imports) == 0 {
@@ -106,6 +117,9 @@ func loadImports(modelPath string, m *model.Model, files Files, res *Result) (by
 	root, inRepo := files.ResolutionRoot(modelPath)
 	for i, imp := range m.Imports {
 		reject := func(format string, args ...any) {
+			if vendored {
+				return
+			}
 			res.Findings = append(res.Findings, Finding{
 				Severity: SeverityError,
 				Category: CategorySemantic,

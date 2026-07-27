@@ -87,6 +87,11 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 		files = OSFiles{}
 	}
 
+	// Whether this file is somebody else's copy is settled first: it decides
+	// which of the layers below are findings about a model this repository
+	// controls, and it holds even when the file does not parse.
+	vendored := runProvenance(src, res)
+
 	// Layer 1: structural validation against the JSON Schema.
 	structuralOK, entityScopes := runStructural(src, res)
 
@@ -105,6 +110,9 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 				Message:  err.Error(),
 			})
 		}
+		if vendored {
+			dropOwnedDiagnostics(res)
+		}
 		sortFindings(res)
 		return res, nil
 	}
@@ -117,7 +125,7 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 	// in an entity position is not one of those rejections (see runStructural),
 	// so it does not take the imports layer down with it.
 	if structuralOK {
-		runImports(path, m, files, res, entityScopes)
+		runImports(path, m, files, res, entityScopes, vendored)
 	}
 	runRelationshipShape(m, res)
 	runSubtypes(m, res)
@@ -125,6 +133,9 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 	runPairing(m, res)
 	runCompleteness(m, res)
 
+	if vendored {
+		dropOwnedDiagnostics(res)
+	}
 	sortFindings(res)
 	return res, nil
 }
