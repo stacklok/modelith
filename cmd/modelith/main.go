@@ -152,7 +152,11 @@ this command prints the entry to add.`),
 				return err
 			}
 
-			printImportResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), res)
+			// A failure to read the working directory only costs the entry
+			// its relative form, so it is not worth failing a completed
+			// import over.
+			wd, _ := os.Getwd()
+			printImportResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), res, wd)
 			return nil
 		},
 	}
@@ -168,7 +172,7 @@ this command prints the entry to add.`),
 // so a prompt is either auto-answered theatre or a wedged non-interactive run.
 // The fetched file is inert until it is named in an imports list, and this
 // command deliberately does not do that — the manual step is the real gate.
-func printImportResult(out, errOut io.Writer, res *deps.Result) {
+func printImportResult(out, errOut io.Writer, res *deps.Result, wd string) {
 	verb := "wrote"
 	if res.Replaced {
 		verb = "replaced"
@@ -181,7 +185,7 @@ func printImportResult(out, errOut io.Writer, res *deps.Result) {
 	// the same reason the imports list is not edited here.
 	fmt.Fprintf(out, "\nAdd it to the model that references it, as a path relative to that model "+
 		"(this one is relative to the current directory):\n\n"+
-		"  imports:\n    - %s\n", importEntry(res.Path))
+		"  imports:\n    - %s\n", importEntry(res.Path, wd))
 	if n := len(res.TheirImports); n > 0 {
 		declares := fmt.Sprintf("declares %d imports of its own", n)
 		if n == 1 {
@@ -196,10 +200,21 @@ func printImportResult(out, errOut io.Writer, res *deps.Result) {
 		"into your published Markdown. Only vendor from sources you trust.\n")
 }
 
-// importEntry writes a path the way an `imports:` entry is written: slash
-// separated, and explicitly relative so it reads as a path rather than as a
+// importEntry writes a path the way an `imports:` entry is written: relative,
+// slash separated, and explicitly so, so it reads as a path rather than as a
 // scope.
-func importEntry(p string) string {
+//
+// An absolute destination is relativized against wd, because an absolute import
+// is a lint error — imports resolve relative to the model that declares them so
+// they work in any checkout. An agent driving this command usually passes an
+// absolute directory, so printing one back would hand it a line the linter
+// rejects. A "../" result is fine; only an absolute one is not.
+func importEntry(p, wd string) string {
+	if filepath.IsAbs(p) && wd != "" {
+		if rel, err := filepath.Rel(wd, p); err == nil {
+			p = rel
+		}
+	}
 	p = filepath.ToSlash(p)
 	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") {
 		return p
@@ -331,6 +346,14 @@ func renderCmd() *cobra.Command {
 				target = defaultOut(in)
 			}
 
+			// A target under a directory that does not exist is a misconfigured
+			// -o, not a document waiting to be written. It is settled before
+			// anything below can exempt a file from the check, so no exemption
+			// can turn a typo into a pass.
+			if check && !isDir(filepath.Dir(target)) {
+				return fmt.Errorf("cannot check %s: %s is not a directory", target, filepath.Dir(target))
+			}
+
 			// A vendored model's rendered form belongs to its home repository,
 			// so it arrives with no committed .md and no obligation to carry
 			// one. --check runs over globs, and demanding one here would make
@@ -345,20 +368,26 @@ func renderCmd() *cobra.Command {
 			// version, a shape this binary does not know — is not a --check
 			// failure, because there is nothing here to fix. `modelith lint`
 			// reports it, loudly and once.
-			vendored := provenance.Present(data)
+			//
+			// The exemption is claimed by a *clean* header, not by
+			// provenance.Present. Present answers a deliberately broad question
+			// so that a broken header still classifies a file as somebody else's
+			// copy, which is right for lint: the header defects are reported and
+			// the completeness noise is suppressed. Skipping on that same answer
+			// would be silent, and would hand the exemption to a model this
+			// repository owns that merely carries a "# modelith-" comment. An
+			// exemption needs a valid claim, so a file whose header does not
+			// parse cleanly is checked like any other — its defects are already
+			// failing `modelith lint`.
+			header, headerProblems := provenance.Parse(data)
+			vendored := header != nil && len(headerProblems) == 0
 			skipVendored := func(tail string) error {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s is a vendored copy %s\n", in, tail)
 				return nil
 			}
 			unrenderable := fmt.Sprintf("this modelith cannot render — skipped (run `modelith lint %s` for details)", in)
-			// A missing target is the ordinary state for a vendored copy — but
-			// only when the directory that would hold it exists. A target under
-			// a directory that does not is a misconfigured -o, and reading that
-			// as "nothing committed yet" would let a typo pass this gate
-			// silently, while the same typo on a model this repository owns
-			// fails.
 			if check && vendored {
-				if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) && isDir(filepath.Dir(target)) {
+				if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) {
 					return skipVendored("with no committed " + filepath.Base(target) + " — skipped")
 				}
 			}

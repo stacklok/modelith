@@ -104,6 +104,12 @@ The one thing `--check` will not do is fail over a vendored model this modelith
 cannot render at all — one written against a newer schema version, say. It says
 it skipped it and moves on; `modelith lint` is where that is reported, once.
 
+Being skipped is an exemption, and it takes a **clean** provenance header to
+claim one. A file whose header has a defect in it — a misplaced line, a missing
+key — is checked like any other model. That way a mistyped comment can never
+quietly switch a gate off: the header defect fails `lint`, and the rendered
+output is still checked.
+
 ## What it will not overwrite
 
 The filename comes from the origin, so a copy can land on a file you already
@@ -115,8 +121,16 @@ have. `deps import` refuses two cases rather than clobbering them:
 - **A copy of a *different* model with the same basename.** Two `payments.modelith.yaml`
   files from two repositories cannot share a directory; give them separate ones.
 
-Re-importing over an existing copy of the *same* model is the ordinary refresh,
-and that goes through — it reports `replaced` rather than `wrote`.
+A copy from the *same* repository at a different path is refused too, because
+modelith cannot tell a model that moved upstream from a second model whose file
+happens to share a name. The message offers both remedies: delete the copy and
+import again if it moved, or import into a different directory if they are two
+different models.
+
+Re-importing over an existing copy of the same model at the same path is the
+ordinary refresh, and that goes through — it reports `replaced` rather than
+`wrote`. Only the origin's *casing* is ignored in that comparison, because
+GitHub treats an owner and repository name case-insensitively.
 
 ## Keeping the copy honest
 

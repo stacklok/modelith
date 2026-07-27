@@ -310,7 +310,7 @@ func TestImport_Rejections(t *testing.T) {
 			name:    "a file that is already a vendored copy",
 			runner:  &fakeRunner{content: "# modelith-origin: https://github.com/other/repo\n" + upstream, sha: sha},
 			url:     blobURL,
-			wantErr: "itself a vendored copy",
+			wantErr: "reads it as somebody else's copy",
 		},
 		{
 			name:    "a file that is not a domain model",
@@ -426,6 +426,84 @@ func TestImport_RefusesToOverwriteWhatItDidNotWrite(t *testing.T) {
 				t.Errorf("the refused import wrote over the file anyway:\n%s", got)
 			}
 		})
+	}
+}
+
+// TestSplitHint pins that the ref/path hint is offered for the failure it
+// explains and no other. It was appended to every fetch error, so "gh is not
+// installed" arrived with a paragraph about ref splitting attached — advice
+// about a URL that was never in question.
+func TestSplitHint(t *testing.T) {
+	t.Parallel()
+
+	src := Source{Ref: "main", Path: "docs/payments.modelith.yaml"}
+	cases := []struct {
+		name string
+		src  Source
+		err  error
+		want bool
+	}{
+		{"a not-found", src, fmt.Errorf("gh: HTTP 404: Not Found"), true},
+		{"gh missing", src, fmt.Errorf("gh is not installed — modelith delegates fetching to it"), false},
+		{"a rejected credential", src, fmt.Errorf("gh: HTTP 401: Bad credentials"), false},
+		{"a forbidden repository", src, fmt.Errorf("gh: HTTP 403: Forbidden"), false},
+		{"an unreachable network", src, fmt.Errorf("dial tcp: lookup api.github.com: no such host"), false},
+		{"a single-segment path has nothing to lose to the ref",
+			Source{Ref: "main", Path: "payments.modelith.yaml"}, fmt.Errorf("gh: HTTP 404: Not Found"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := splitHint(tc.src, tc.err) != ""; got != tc.want {
+				t.Errorf("splitHint offered = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestImport_RefreshIsNotRefusedOverCasing pins that guardTarget compares an
+// origin the way GitHub does. Owner and repository names are case-insensitive
+// there, and Source.Origin keeps whatever casing the URL was typed with, so a
+// byte-for-byte comparison refused a legitimate refresh — and explained it by
+// claiming two different models shared the filename.
+func TestImport_RefreshIsNotRefusedOverCasing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if _, err := importInto(t, dir, &fakeRunner{content: upstream, sha: sha},
+		"https://github.com/Acme/Billing/blob/main/docs/payments.modelith.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := importInto(t, dir, &fakeRunner{content: upstream + "  # newer\n", sha: "9" + sha[1:]}, blobURL)
+	if err != nil {
+		t.Fatalf("a refresh differing only in the origin's casing was refused: %v", err)
+	}
+	if !res.Replaced {
+		t.Error("did not report replacing the earlier copy")
+	}
+}
+
+// TestImport_RefusesAMovedPathWithTheRightRemedy pins the other half: the same
+// repository at a different path is ambiguous — the model moved, or two models
+// there share a basename — and the two remedies differ. Offering only "import
+// into a different directory" left the user of a moved model with no way
+// forward the message named.
+func TestImport_RefusesAMovedPathWithTheRightRemedy(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if _, err := importInto(t, dir, &fakeRunner{content: upstream, sha: sha}, blobURL); err != nil {
+		t.Fatal(err)
+	}
+	_, err := importInto(t, dir, &fakeRunner{content: upstream, sha: sha},
+		"https://github.com/acme/billing/blob/main/models/payments.modelith.yaml")
+	if err == nil {
+		t.Fatal("a second model from the same repository silently replaced the first")
+	}
+	for _, want := range []string{"If the model moved, delete", "import into a different directory"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not offer %q: %v", want, err)
+		}
 	}
 }
 

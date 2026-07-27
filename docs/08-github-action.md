@@ -69,6 +69,10 @@ document:
   it here would fail your build twice over one problem you cannot fix in your
   own repository.
 
+Both skips take a clean provenance header to claim. A file whose header has a
+defect in it is checked like any model you wrote, so a stray `# modelith-`
+comment cannot quietly switch the gate off.
+
 Everything else still applies. A vendored file that is not a valid domain
 model, or that has been edited since it was imported, fails the build — both
 are about *your* repository's copy, and both are yours to fix.

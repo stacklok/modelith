@@ -343,26 +343,58 @@ func TestRenderCheckChecksACommittedVendoredMarkdown(t *testing.T) {
 	}
 }
 
-// TestRenderCheckRejectsAnOutPathUnderNoDirectory pins that the vendored skip
-// does not swallow a misconfigured -o. A target under a directory that does not
-// exist stats as ErrNotExist exactly like an uncommitted one, so reading it as
-// "nothing committed yet" let a typo pass this gate on a vendored model while
-// the same typo on a model this repository owns failed.
+// TestRenderCheckRejectsAnOutPathUnderNoDirectory pins that no exemption
+// swallows a misconfigured -o. A target under a directory that does not exist
+// stats as ErrNotExist exactly like an uncommitted one, so reading it as
+// "nothing committed yet" let a typo pass this gate. The unrenderable case is
+// the one that survived the first attempt at this: its skip returned after the
+// target check rather than before it.
 func TestRenderCheckRejectsAnOutPathUnderNoDirectory(t *testing.T) {
-	dir := t.TempDir()
-	bad := filepath.Join(dir, "nosuchdir", "out.md")
+	unrenderable := strings.Replace(minimalValid, "version: v1", "version: v99", 1)
 
 	for _, tc := range []struct{ name, src string }{
 		{"a vendored copy", vendorHeader(minimalValid) + minimalValid},
 		{"a model this repository owns", minimalValid},
+		{"a vendored copy this build cannot render", vendorHeader(unrenderable) + unrenderable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
 			yamlPath := writeTemp(t, dir, "m.modelith.yaml", tc.src)
-			out, err := run(t, "render", "--check", "-o", bad, yamlPath)
+			out, err := run(t, "render", "--check", "-o", filepath.Join(dir, "nosuchdir", "out.md"), yamlPath)
 			if err == nil {
 				t.Fatalf("a target under a missing directory passed --check: %s", out)
 			}
 		})
+	}
+}
+
+// TestRenderCheckDoesNotExemptAModelThisRepoOwns pins that the --check skip is
+// claimed by a clean provenance header, not by provenance.Present.
+//
+// Present answers a deliberately broad question so a broken header still marks a
+// file as somebody else's copy, which is what lint needs. Skipping on that same
+// answer handed the exemption to a model this repository owns that merely
+// carried a "# modelith-" comment: lint shouted five errors, but a CI job
+// running only `render --check` silently lost its gate and exited 0.
+func TestRenderCheckDoesNotExemptAModelThisRepoOwns(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := writeTemp(t, dir, "own.modelith.yaml",
+		minimalValid+"\n# modelith-note: this file is generated\n")
+
+	out, err := run(t, "render", "--check", yamlPath)
+	if err == nil {
+		t.Fatalf("a model this repository owns was exempted from --check: %s", out)
+	}
+	if strings.Contains(out, "vendored copy") {
+		t.Errorf("it was reported as a vendored copy:\n%s", out)
+	}
+
+	// A header with a real defect in it earns no exemption either: the file is
+	// checked like any other, and lint reports the defect.
+	displaced := writeTemp(t, dir, "displaced.modelith.yaml",
+		"---\n"+vendorHeader(minimalValid)+minimalValid)
+	if _, err := run(t, "render", "--check", displaced); err == nil {
+		t.Error("a vendored copy with a displaced header was exempted from --check")
 	}
 }
 
@@ -410,7 +442,7 @@ func TestDepsImportOutput(t *testing.T) {
 
 	t.Run("a leaf model", func(t *testing.T) {
 		var out, errOut bytes.Buffer
-		printImportResult(&out, &errOut, res)
+		printImportResult(&out, &errOut, res, "")
 		// The entry names where the copy actually landed. Printing the bare
 		// basename told a user who passed a directory to paste a path that
 		// resolves to nothing.
@@ -431,7 +463,7 @@ func TestDepsImportOutput(t *testing.T) {
 		var out, errOut bytes.Buffer
 		chained := *res
 		chained.TheirImports = []string{"./ledger.modelith.yaml"}
-		printImportResult(&out, &errOut, &chained)
+		printImportResult(&out, &errOut, &chained, "")
 		for _, want := range []string{
 			"declares an import of its own (./ledger.modelith.yaml)",
 			"resolution is not",
@@ -447,9 +479,25 @@ func TestDepsImportOutput(t *testing.T) {
 		var out, errOut bytes.Buffer
 		here := *res
 		here.Path = "payments.modelith.yaml"
-		printImportResult(&out, &errOut, &here)
+		printImportResult(&out, &errOut, &here, "")
 		if !strings.Contains(out.String(), "- ./payments.modelith.yaml") {
 			t.Errorf("stdout does not contain the entry:\n%s", out.String())
+		}
+	})
+
+	// An agent driving this command usually passes an absolute destination.
+	// Printing one straight back produced an entry the linter rejects outright:
+	// imports are relative so they resolve in any checkout.
+	t.Run("an absolute destination is relativized", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		abs := *res
+		abs.Path = filepath.Join(string(filepath.Separator), "home", "me", "repo", "docs", "payments.modelith.yaml")
+		printImportResult(&out, &errOut, &abs, filepath.Join(string(filepath.Separator), "home", "me", "repo"))
+		if !strings.Contains(out.String(), "- ./docs/payments.modelith.yaml") {
+			t.Errorf("stdout does not contain a relative entry:\n%s", out.String())
+		}
+		if strings.Contains(out.String(), "- /home/me") {
+			t.Errorf("stdout still contains an absolute import entry:\n%s", out.String())
 		}
 	})
 
@@ -457,7 +505,7 @@ func TestDepsImportOutput(t *testing.T) {
 		var out, errOut bytes.Buffer
 		replaced := *res
 		replaced.Replaced = true
-		printImportResult(&out, &errOut, &replaced)
+		printImportResult(&out, &errOut, &replaced, "")
 		if !strings.HasPrefix(out.String(), "replaced ") {
 			t.Errorf("stdout does not report the replacement:\n%s", out.String())
 		}

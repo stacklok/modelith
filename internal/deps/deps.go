@@ -184,12 +184,12 @@ func Import(ctx context.Context, opts Options) (*Result, error) {
 
 	content, err := fetchContent(ctx, runner, src)
 	if err != nil {
-		return nil, fmt.Errorf("%w%s", err, splitHint(src))
+		return nil, fmt.Errorf("%w%s", err, splitHint(src, err))
 	}
 	if provenance.Present(content) {
 		return nil, fmt.Errorf(
-			"%s is itself a vendored copy — it carries a provenance header naming where it came from. Vendor it from that origin instead, so this repository tracks the model's home rather than somebody else's copy of it",
-			opts.URL)
+			"%s carries a %s line, so modelith reads it as somebody else's copy rather than a model's home. If it is a copy, vendor it from the origin its header names instead, so this repository tracks the model's home. If it is not — the line is an ordinary comment that happens to use modelith's reserved prefix at column zero — it has to be indented or removed at the origin before this file can be vendored",
+			opts.URL, provenance.LinePrefix)
 	}
 	m, err := model.Parse(content)
 	if err != nil {
@@ -262,10 +262,24 @@ func guardTarget(target string, src Source) (replaced bool, err error) {
 	// copy, and replacing it is how it gets repaired; only a header that names
 	// a *different* model blocks the write.
 	h, _ := provenance.Parse(existing)
-	if h.Origin != "" && h.Path != "" && (h.Origin != src.Origin || h.Path != src.Path) {
+	if h.Origin == "" || h.Path == "" {
+		return true, nil
+	}
+	switch {
+	// GitHub treats an owner and a repository name case-insensitively, and
+	// Origin keeps whatever casing the URL was typed with, so comparing these
+	// byte-for-byte would refuse a refresh over nothing but capitalisation.
+	case !strings.EqualFold(h.Origin, src.Origin):
 		return false, fmt.Errorf(
 			"%s is a vendored copy of %s/%s, not of %s/%s — two different models share that filename. Import into a different directory so both can live here",
 			target, h.Origin, h.Path, src.Origin, src.Path)
+	case h.Path != src.Path:
+		// Same repository, different path: either the model moved upstream or
+		// this repository has two models from it sharing a basename. Only the
+		// user knows which, and the two remedies are different.
+		return false, fmt.Errorf(
+			"%s is a vendored copy of %s in %s, and you are importing %s from the same repository. If the model moved, delete %s and import again; if these are two different models, import into a different directory so both can live here",
+			target, h.Path, h.Origin, src.Path, target)
 	}
 	return true, nil
 }
@@ -274,15 +288,30 @@ func guardTarget(target string, src Source) (replaced bool, err error) {
 // accepted. A browse URL gives no way to tell where a ref containing a slash
 // ends and the path begins, so the split is taken at the first segment; a failed
 // fetch is where that guess surfaces, as a 404 that looks like the file is
-// simply not there. A single-segment path had nothing to lose to the ref, so it
-// gets no hint.
-func splitHint(src Source) string {
-	if !strings.Contains(src.Path, "/") {
+// simply not there.
+//
+// It is offered only for that failure. A missing gh, a rejected credential, an
+// unreachable network — none of those say anything about the URL, and adding a
+// paragraph about ref splitting to them would send the reader after the wrong
+// problem. A single-segment path had nothing to lose to the ref, so it gets no
+// hint either.
+func splitHint(src Source, err error) string {
+	if !strings.Contains(src.Path, "/") || !isNotFound(err) {
 		return ""
 	}
 	return fmt.Sprintf(
 		"\n\nmodelith read %q as the ref and %q as the path. If the ref has a slash in it that split is wrong: pass the whole ref to --ref, or — if --ref is already pinning a different ref, which cannot re-split the path — open the file on the ref you want and import that URL instead",
 		src.Ref, src.Path)
+}
+
+// isNotFound reports whether err is gh saying the endpoint does not exist.
+//
+// It matches gh's text because gh is a separate program: it reports the status
+// on stderr and exits 1, so there is no typed error to unwrap. Reading it wrong
+// costs a hint that should not have printed, or one that should have.
+func isNotFound(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "404") || strings.Contains(msg, "Not Found")
 }
 
 // fetchContent returns the file's bytes. The raw media type asks the API for
