@@ -28,6 +28,7 @@ func TestADR_0011_OfflinePackages(t *testing.T) {
 		"github.com/stacklok/modelith/internal/render/mermaid",
 		"github.com/stacklok/modelith/internal/schema",
 		"github.com/stacklok/modelith/internal/model",
+		"github.com/stacklok/modelith/internal/provenance",
 	}
 
 	// net/url and net/netip are parsers that perform no I/O; the JSON Schema
