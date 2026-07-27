@@ -106,6 +106,31 @@ way: the reader sees the characters the author typed.
   construction and it would rewrite the author's prose — reflowed paragraphs,
   normalized emphasis, churn in every committed `.md` on every upgrade of the
   library.
+- **Vendor goldmark's table transformer to parse as GFM.** The parser
+  configuration here is CommonMark; every reader's is GFM. GitHub and Docusaurus
+  both apply the GFM extensions, and GFM's table transformer can dissolve a
+  paragraph into a table, so a CommonMark code span that spanned a newline never
+  forms and its contents land live. `goldmark/extension` cannot be added for its
+  parsers alone: every file in it imports the root `goldmark` package for the
+  `Extend` signature, whose eager `defaultMarkdown` global drags `renderer` and
+  `renderer/html` into the binary — measured, 27 renderer symbols against zero
+  today. Closing it means vendoring the transformer into a renderer-free
+  package.
+
+  Rejected on cost against threat. Reaching this needs a model author who is
+  hostile *and* already has commit access to the repository being rendered —
+  who could edit the generated `.md` directly instead. Carrying a vendored copy
+  of someone else's parser internals, with its own licence and upgrade burden,
+  is not worth closing a hole that only opens when the author is a stranger.
+
+  **That changes when vendoring lands.** ADR-0010's slice 2 renders models from
+  repositories this one does not control, which is the first time the author of
+  a prose string is not already trusted. The decision there is to say so rather
+  than to armour the renderer: `modelith deps import` and `deps update` warn
+  that vendoring carries an injection risk and that models should only be
+  vendored from sources you trust. In practice vendoring is expected to be
+  between projects that already trust each other. If that assumption stops
+  holding, revisit this rejection before adding more escaping.
 
 ## Consequences
 
@@ -179,12 +204,6 @@ rule above is about what a parser calls a tag, and none of these is one.
   the escaping existed. Refusing an unbalanced fence reads as a lint rule about
   a malformed prose block rather than as a renderer escaping decision, and which
   it should be is not settled here.
-- **The parser configuration is CommonMark; every reader's is GFM.** GitHub and
-  Docusaurus both apply the GFM extensions, and GFM's table transformer can
-  dissolve a paragraph into a table, so a CommonMark code span that spanned a
-  newline never forms and its contents land live. `goldmark/extension` cannot be
-  added for its parsers alone: every file in it imports the root `goldmark`
-  package for the `Extend` signature, whose eager `defaultMarkdown` global drags
-  `renderer` and `renderer/html` into the binary — measured, 27 renderer symbols
-  against zero today. Closing this means vendoring the table transformer into a
-  renderer-free package, which is a dependency-surface decision of its own.
+The parser-configuration gap — CommonMark here, GFM in every reader — *was*
+open when this ADR was first written. It is now decided: see "Vendor goldmark's
+table transformer to parse as GFM" under Considered and rejected.
