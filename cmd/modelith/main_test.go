@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stacklok/modelith/internal/provenance"
 )
 
 // run executes the CLI with args, capturing stdout+stderr, and returns the
@@ -267,6 +269,43 @@ func TestRenderCheckDetectsDrift(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "out of date") {
 		t.Fatalf("expected an out-of-date error, got: %v", err)
+	}
+}
+
+// TestRenderCheckSkipsAVendoredCopy covers the half of ADR-0015 that lives in
+// the CLI: a vendored model has no committed .md here, and --check runs over
+// globs, so demanding one would fail a build over somebody else's document.
+// Rendering it by name still works — that is what a deep link points at.
+func TestRenderCheckSkipsAVendoredCopy(t *testing.T) {
+	dir := t.TempDir()
+	header := "# modelith-vendored: " + provenance.Banner + "\n" +
+		"# modelith-fetch: git\n" +
+		"# modelith-origin: https://github.com/stacklok/some-repo\n" +
+		"# modelith-path: docs/m.modelith.yaml\n" +
+		"# modelith-ref: main\n" +
+		"# modelith-commit: 4f2c1e9\n" +
+		"# modelith-imported: 2026-07-27\n" +
+		"# modelith-digest: " + provenance.Digest([]byte(minimalValid)) + "\n"
+	yamlPath := writeTemp(t, dir, "m.modelith.yaml", header+minimalValid)
+
+	// No .md exists at all, which is the state a fresh `deps import` leaves.
+	out, err := run(t, "render", "--check", yamlPath)
+	if err != nil {
+		t.Fatalf("--check failed on a vendored copy: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, "vendored copy") {
+		t.Errorf("output does not say why it was skipped: %q", out)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "m.modelith.md")); !os.IsNotExist(err) {
+		t.Error("--check wrote a file")
+	}
+
+	if _, err := run(t, "render", yamlPath); err != nil {
+		t.Fatalf("rendering a vendored model by name failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "m.modelith.md")); err != nil {
+		t.Errorf("rendering by name wrote nothing: %v", err)
 	}
 }
 

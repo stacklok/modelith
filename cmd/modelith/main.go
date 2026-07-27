@@ -15,6 +15,7 @@ import (
 
 	"github.com/stacklok/modelith/internal/lint"
 	"github.com/stacklok/modelith/internal/model"
+	"github.com/stacklok/modelith/internal/provenance"
 	"github.com/stacklok/modelith/internal/render/markdown"
 	"github.com/stacklok/modelith/internal/schema"
 )
@@ -204,6 +205,17 @@ func renderCmd() *cobra.Command {
 			data, err := os.ReadFile(in)
 			if err != nil {
 				return fmt.Errorf("%s: %w", in, err)
+			}
+			// A vendored model's rendered form belongs to its home repository,
+			// so it arrives with no committed .md and no obligation to carry
+			// one. --check runs over globs, and demanding one here would make
+			// this repository regenerate somebody else's document every time
+			// their model moved (ADR-0015). Naming the file to render it still
+			// renders it; that is how a deep link into a vendored model's .md
+			// gets something to point at.
+			if check && provenance.Present(data) {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s is a vendored copy — skipped\n", in)
+				return nil
 			}
 			// Validate against the schema first so a malformed file fails with a
 			// friendly, located error rather than the raw strict-YAML parse error.
