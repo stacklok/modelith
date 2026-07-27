@@ -42,7 +42,7 @@ func TestPresent(t *testing.T) {
 		{"an ordinary comment that only looks like one", "#modelith-fetch: git\nkind: DomainModel\n", false},
 		{"an indented provenance line is an ordinary comment", "  # modelith-fetch: git\nkind: DomainModel\n", false},
 		{"a broken header is still a header", "# modelith-nonsense: x\nkind: DomainModel\n", true},
-		{"a provenance line below the model content is an ordinary comment", plain + "# modelith-fetch: git\n", false},
+		{"a header displaced below the model content is still a header", plain + "# modelith-fetch: git\n", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -275,6 +275,45 @@ func TestDigest_CoversALineBelowTheHeader(t *testing.T) {
 	}
 	if !strings.Contains(string(Strip([]byte(added))), "# modelith-fetch: git") {
 		t.Error("Strip removed a line below the leading comment block")
+	}
+}
+
+// TestPresent_ADisplacedHeaderStaysLoud pins the reason Present asks a broader
+// question than Parse and Strip do. Prepending one non-comment line to a
+// vendored file puts its whole header below the leading comment block. Answering
+// the narrow question there would call the file this repository's own work, and
+// every consequence of that answer is silent: no digest check, completeness
+// gaps about somebody else's document, and a `deps import` that refuses to
+// repair the file because it "carries no provenance header".
+func TestPresent_ADisplacedHeaderStaysLoud(t *testing.T) {
+	t.Parallel()
+
+	displaced := "---\n" + vendored
+	if !Present([]byte(displaced)) {
+		t.Fatal("a vendored file with its header displaced read as this repository's own work")
+	}
+	h, problems := Parse([]byte(displaced))
+	if h == nil {
+		t.Fatal("Parse returned no header for a displaced one")
+	}
+	var misplaced, missing int
+	for _, p := range problems {
+		switch {
+		case strings.Contains(p.Message, "below the leading comment block"):
+			misplaced++
+		case strings.Contains(p.Message, "is missing"):
+			missing++
+		}
+	}
+	if misplaced != len(keyOrder) {
+		t.Errorf("reported %d misplaced lines, want one per key (%d)", misplaced, len(keyOrder))
+	}
+	if missing == 0 {
+		t.Error("no key was reported missing, so the header read as complete")
+	}
+	// Nothing was stripped, so the digest cannot match what the header records.
+	if string(Strip([]byte(displaced))) != displaced {
+		t.Error("Strip removed a line from below the leading comment block")
 	}
 }
 

@@ -351,8 +351,14 @@ func renderCmd() *cobra.Command {
 				return nil
 			}
 			unrenderable := fmt.Sprintf("this modelith cannot render — skipped (run `modelith lint %s` for details)", in)
+			// A missing target is the ordinary state for a vendored copy — but
+			// only when the directory that would hold it exists. A target under
+			// a directory that does not is a misconfigured -o, and reading that
+			// as "nothing committed yet" would let a typo pass this gate
+			// silently, while the same typo on a model this repository owns
+			// fails.
 			if check && vendored {
-				if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) {
+				if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) && isDir(filepath.Dir(target)) {
 					return skipVendored("with no committed " + filepath.Base(target) + " — skipped")
 				}
 			}
@@ -428,6 +434,14 @@ func renderCmd() *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("stdout", "out")
 	cmd.MarkFlagsMutuallyExclusive("stdout", "check")
 	return cmd
+}
+
+// isDir reports whether p exists and is a directory. Anything else — missing,
+// a plain file, unreadable — is false, because every one of those means a
+// target under p is not merely uncommitted.
+func isDir(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }
 
 // defaultOut is where render writes when no -o is given: a model's .md beside

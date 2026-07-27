@@ -343,6 +343,29 @@ func TestRenderCheckChecksACommittedVendoredMarkdown(t *testing.T) {
 	}
 }
 
+// TestRenderCheckRejectsAnOutPathUnderNoDirectory pins that the vendored skip
+// does not swallow a misconfigured -o. A target under a directory that does not
+// exist stats as ErrNotExist exactly like an uncommitted one, so reading it as
+// "nothing committed yet" let a typo pass this gate on a vendored model while
+// the same typo on a model this repository owns failed.
+func TestRenderCheckRejectsAnOutPathUnderNoDirectory(t *testing.T) {
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "nosuchdir", "out.md")
+
+	for _, tc := range []struct{ name, src string }{
+		{"a vendored copy", vendorHeader(minimalValid) + minimalValid},
+		{"a model this repository owns", minimalValid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			yamlPath := writeTemp(t, dir, "m.modelith.yaml", tc.src)
+			out, err := run(t, "render", "--check", "-o", bad, yamlPath)
+			if err == nil {
+				t.Fatalf("a target under a missing directory passed --check: %s", out)
+			}
+		})
+	}
+}
+
 // TestRenderCheckStaysQuietOnAVendoredCopyItCannotRender pins that --check does
 // not turn this repository's build red over a defect in a document it does not
 // own. A copy fetched from a repository on a newer modelith can be unreadable

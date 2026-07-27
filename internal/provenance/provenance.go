@@ -13,12 +13,14 @@ import (
 
 // LinePrefix begins every provenance line.
 //
-// A line counts only when it starts at column zero and sits in the leading
-// comment block. An indented "# modelith-" comment, or one below the first line
-// of model content, is an ordinary comment: it is neither parsed nor stripped,
-// so the bytes Parse reads and the bytes Digest covers can never disagree about
-// which lines are header. That single rule is the whole contract — the digest
-// is defined by the strip (ADR-0015).
+// A line is *header* only when it starts at column zero and sits in the leading
+// comment block. Parse reads exactly those lines and Strip removes exactly
+// those lines, so the bytes Parse reads and the bytes Digest covers can never
+// disagree about which lines are header — the digest is defined by the strip
+// (ADR-0015).
+//
+// Present asks a different question and deliberately answers it more broadly;
+// see its own comment.
 const LinePrefix = "# modelith-"
 
 // lineRE matches one provenance line and splits it into key and value. The
@@ -103,27 +105,26 @@ type Problem struct {
 	Message string
 }
 
-// Present reports whether src carries a provenance line at all.
+// Present reports whether src carries a provenance line anywhere, which is what
+// makes a file vendored.
 //
-// This, not a successful Parse, is what makes a file vendored. A header with a
-// typo in it still means the file is somebody else's copy, and treating it as
-// this repo's own work would bury the typo under a flood of completeness gaps
-// about a document nobody here controls.
+// It is deliberately broader than the header rule Parse and Strip share. A
+// header with a typo in it — or one displaced below the leading comment block
+// by an edit that prepended a line — still means the file is somebody else's
+// copy. Asking the narrow question here would answer "not vendored" for a file
+// that plainly is one, and every downstream consequence of that answer is
+// silent: the digest stops being checked, completeness gaps about a document
+// nobody here controls appear, and `deps import` refuses to repair the file on
+// the grounds that it carries no header. Answering broadly instead makes the
+// same input loud — Parse reports each displaced line, and the missing-key
+// checks fire — which is the failure mode to prefer when the two must differ.
 func Present(src []byte) bool {
-	return headerLines(strings.Split(string(src), "\n")) > 0
-}
-
-// headerLines counts the provenance lines in the leading comment block, which
-// are the only lines that are header at all — the rule Parse, Strip, and
-// Present all read from, so none of them can disagree with the others.
-func headerLines(lines []string) int {
-	n := 0
-	for _, line := range lines[:leadingCommentBlock(lines)] {
+	for _, line := range strings.Split(string(src), "\n") {
 		if lineRE.MatchString(line) {
-			n++
+			return true
 		}
 	}
-	return n
+	return false
 }
 
 // Parse reads the provenance header from src. It returns a nil Header when src
@@ -218,10 +219,11 @@ func (h *Header) Verify(src []byte) (ok bool, got string) {
 	return got == h.Digest, got
 }
 
-// Strip returns src with its provenance lines removed, which is the content the
-// digest covers. Only the leading comment block is stripped: a "# modelith-"
-// line below it is model content's neighbour, not header, and Parse reports it
-// as misplaced rather than reading it (see LinePrefix).
+// Strip returns src with its header removed, which is the content the digest
+// covers. Only the leading comment block is stripped: a "# modelith-" line
+// below it is not header, and Parse reports it as misplaced rather than reading
+// it (see LinePrefix). Removing it here would let an edit that added or removed
+// one leave the digest untouched, which is the drift the digest exists to see.
 func Strip(src []byte) []byte {
 	lines := strings.Split(string(src), "\n")
 	lead := leadingCommentBlock(lines)
@@ -259,8 +261,8 @@ func (h *Header) Format() string {
 // directive stays first, and at the top otherwise.
 func Stamp(src []byte, h *Header) []byte {
 	lines := strings.Split(string(src), "\n")
-	at := 0
-	for i := 0; i < leadingCommentBlock(lines); i++ {
+	at, lead := 0, leadingCommentBlock(lines)
+	for i := 0; i < lead; i++ {
 		if strings.HasPrefix(lines[i], "# yaml-language-server:") {
 			at = i + 1
 		}
