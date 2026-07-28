@@ -554,6 +554,194 @@ func TestDepsImportRejectsBadArguments(t *testing.T) {
 	}
 }
 
+// report builds a Report for a copy that was reached and found current at the
+// given ref. Calling provenance.Digest here is fixture plumbing, not the
+// assertion: what the digest covers is pinned in internal/provenance, and what
+// it decides is pinned in internal/deps. These tests are about the printing.
+func report(path, ref, commit string) deps.Report {
+	const content = "kind: DomainModel\n"
+	return deps.Report{
+		Path: path,
+		State: &deps.State{
+			Path: path, Ref: ref,
+			Header:   &provenance.Header{Commit: commit, Digest: provenance.Digest([]byte(content))},
+			Local:    []byte(content),
+			Upstream: []byte(content),
+		},
+		Commit: commit,
+	}
+}
+
+func TestDepsCheckOutput(t *testing.T) {
+	// Stale is an origin serving bytes that no longer hash to what the header
+	// recorded.
+	stale := report("docs/ledger.modelith.yaml", "main", "a91b0c37e5d248fa")
+	stale.State.Upstream = []byte("kind: DomainModel\ntitle: moved on\n")
+
+	t.Run("verdicts name the ref and the summary counts what was covered", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		reports := []deps.Report{
+			report("docs/payments.modelith.yaml", "v2.1.0", "4f2c1e9c8b3ad0e5"),
+			stale,
+			{Path: "docs/ours.modelith.yaml", Skipped: true},
+			{Path: "docs/gone.modelith.yaml", Err: errors.New("cannot be read: no such file or directory")},
+		}
+		blocking := printCheckReports(&out, &errOut, reports)
+		if !blocking {
+			t.Error("a stale copy did not make the run exit non-zero")
+		}
+		for _, want := range []string{
+			// Naming the ref is what keeps a pinned copy's verdict honest: it
+			// reads as a statement about the pin, not about the world.
+			"docs/payments.modelith.yaml: up to date at v2.1.0",
+			"docs/ledger.modelith.yaml: stale at main — the origin is now at a91b0c3",
+			"checked 2 vendored copies, 1 stale, 1 file could not be reached; skipped 1 file with no provenance header",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("stdout does not contain %q:\n%s", want, out.String())
+			}
+		}
+		if !strings.Contains(errOut.String(), "docs/gone.modelith.yaml: cannot be read") {
+			t.Errorf("the failure is not on stderr:\n%s", errOut.String())
+		}
+	})
+
+	// A user whose glob matched only their own models must not read "all up to
+	// date" as a statement about their vendored copies.
+	t.Run("a run that reached nothing says so", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		blocking := printCheckReports(&out, &errOut, []deps.Report{
+			{Path: "a.modelith.yaml", Skipped: true},
+			{Path: "b.modelith.yaml", Skipped: true},
+		})
+		if blocking {
+			t.Error("a run with nothing to check exited non-zero")
+		}
+		if want := "checked 0 vendored copies, 0 stale; skipped 2 files with no provenance header"; !strings.Contains(out.String(), want) {
+			t.Errorf("stdout does not contain %q:\n%s", want, out.String())
+		}
+	})
+
+	// A file that could not be reached is not evidence that it is current.
+	t.Run("a failure alone exits non-zero", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		if !printCheckReports(&out, &errOut, []deps.Report{{Path: "x", Err: errors.New("boom")}}) {
+			t.Error("a run where nothing could be reached exited zero")
+		}
+	})
+
+	// survey does not produce a Report with neither a verdict nor a failure —
+	// but one reached the printer once and took the whole command down with a
+	// nil dereference. A command whose job is reporting calmly on other
+	// people's files must not be the thing that crashes.
+	t.Run("a report with no verdict is not a crash", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		printCheckReports(&out, &errOut, []deps.Report{{Path: "abandoned.modelith.yaml"}})
+		printUpdateReports(&out, &errOut, []deps.Report{{Path: "abandoned.modelith.yaml"}})
+		if strings.Contains(out.String(), "1 vendored copy") {
+			t.Errorf("an unjudged file was counted as reached:\n%s", out.String())
+		}
+	})
+}
+
+func TestDepsUpdateOutput(t *testing.T) {
+	t.Run("a refresh names both commits, and the run closes with what to do next", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		refreshed := report("docs/ledger.modelith.yaml", "main", "a91b0c37e5d248fa")
+		refreshed.State.Header.Commit = "4f2c1e9c8b3ad0e5"
+		refreshed.Written = true
+		refreshed.NewImports = []string{"./tax.modelith.yaml"}
+
+		if printUpdateReports(&out, &errOut, []deps.Report{
+			refreshed,
+			report("docs/payments.modelith.yaml", "v2.1.0", "4f2c1e9c8b3ad0e5"),
+		}) {
+			t.Error("a successful update exited non-zero")
+		}
+		for _, want := range []string{
+			"docs/ledger.modelith.yaml: 4f2c1e9 → a91b0c3 at main",
+			"docs/payments.modelith.yaml: up to date at v2.1.0",
+			"updated 1 of 2 vendored copies",
+			"now declares an import of its own (./tax.modelith.yaml)",
+			"Run `modelith lint` on the models that import these copies",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("stdout does not contain %q:\n%s", want, out.String())
+			}
+		}
+		if !strings.Contains(errOut.String(), "Only vendor from sources you trust") {
+			t.Errorf("an update that wrote did not repeat the trust warning:\n%s", errOut.String())
+		}
+	})
+
+	// Nothing arrived, so there is nothing to warn about and no vocabulary that
+	// can have moved under the models importing these copies. Printing either
+	// on a no-op run is the fastest way to teach people to skip both.
+	t.Run("a no-op run warns about nothing", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		printUpdateReports(&out, &errOut, []deps.Report{
+			report("docs/payments.modelith.yaml", "main", "4f2c1e9c8b3ad0e5"),
+		})
+		if errOut.Len() != 0 {
+			t.Errorf("a no-op update printed to stderr:\n%s", errOut.String())
+		}
+		if strings.Contains(out.String(), "modelith lint") {
+			t.Errorf("a no-op update told the user to lint:\n%s", out.String())
+		}
+	})
+
+	t.Run("a restore says the edits went", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		restored := report("docs/payments.modelith.yaml", "main", "4f2c1e9c8b3ad0e5")
+		restored.Written, restored.Restored = true, true
+		printUpdateReports(&out, &errOut, []deps.Report{restored})
+		if want := "restored to 4f2c1e9 — local edits discarded, make the change at its origin"; !strings.Contains(out.String(), want) {
+			t.Errorf("stdout does not contain %q:\n%s", want, out.String())
+		}
+	})
+}
+
+// TestDepsRejectsBadArguments covers the paths that fail before any fetch, so
+// they need no network and no gh.
+func TestDepsRejectsBadArguments(t *testing.T) {
+	dir := t.TempDir()
+	ours := writeTemp(t, dir, "ours.modelith.yaml", minimalValid)
+	theirs := writeTemp(t, dir, "theirs.modelith.yaml", minimalValid)
+
+	t.Run("--ref across several copies is refused", func(t *testing.T) {
+		out, err := run(t, "deps", "update", "--ref", "v2.2.0", ours, theirs)
+		if err == nil || !strings.Contains(err.Error(), "--ref re-pins one copy") {
+			t.Fatalf("want a refusal naming the flag, got %v", err)
+		}
+		// A run refused before it started has nothing to summarise. Printing
+		// "updated 0 of 0 vendored copies" above the reason reads as the
+		// outcome of a run that happened.
+		if strings.Contains(out, "vendored cop") {
+			t.Errorf("a refused run printed a summary:\n%s", out)
+		}
+	})
+
+	t.Run("no files at all is a usage error", func(t *testing.T) {
+		for _, sub := range []string{"check", "update"} {
+			if _, err := run(t, "deps", sub); err == nil {
+				t.Errorf("deps %s with no arguments succeeded", sub)
+			}
+		}
+	})
+
+	// A glob of this repository's own models reaches nothing and needs no gh:
+	// the header check happens before any fetch.
+	t.Run("a glob with no vendored copy in it needs no network", func(t *testing.T) {
+		out, err := run(t, "deps", "check", ours, theirs)
+		if err != nil {
+			t.Fatalf("checking two unvendored files failed: %v", err)
+		}
+		if want := "skipped 2 files with no provenance header"; !strings.Contains(out, want) {
+			t.Errorf("output does not contain %q:\n%s", want, out)
+		}
+	})
+}
+
 func TestSchemaOutputsValidJSON(t *testing.T) {
 	out, err := run(t, "schema")
 	if err != nil {
