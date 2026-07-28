@@ -244,7 +244,9 @@ Nothing is written.`),
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reports, err := deps.Check(cmd.Context(), deps.CheckOptions{Paths: args})
-			blocking := printCheckReports(cmd.OutOrStdout(), cmd.ErrOrStderr(), reports)
+			// A run that got nowhere has nothing to summarise, and "checked 0
+			// vendored copies" above the reason would read as the outcome.
+			blocking := len(reports) > 0 && printCheckReports(cmd.OutOrStdout(), cmd.ErrOrStderr(), reports)
 			if err != nil {
 				return err
 			}
@@ -291,7 +293,8 @@ Fetching is delegated to the gh CLI, which must be installed and authenticated.`
 				Ref:   ref,
 				Now:   time.Now(),
 			})
-			blocking := printUpdateReports(cmd.OutOrStdout(), cmd.ErrOrStderr(), reports)
+			// See depsCheckCmd: nothing reached means nothing to summarise.
+			blocking := len(reports) > 0 && printUpdateReports(cmd.OutOrStdout(), cmd.ErrOrStderr(), reports)
 			if err != nil {
 				return err
 			}
@@ -315,6 +318,11 @@ func printCheckReports(out, errOut io.Writer, reports []deps.Report) bool {
 		case r.Skipped:
 		case r.Err != nil:
 			fmt.Fprintf(errOut, "%s: %v\n", r.Path, r.Err)
+		case r.State == nil:
+			// A file the run abandoned rather than judged. survey does not hand
+			// one back, and this keeps a future one that does from crashing a
+			// command whose whole job is to report calmly on other people's
+			// files.
 		case r.Stale():
 			stale++
 			fmt.Fprintf(out, "%s: stale at %s — the origin is now at %s\n",
@@ -346,6 +354,8 @@ func printUpdateReports(out, errOut io.Writer, reports []deps.Report) bool {
 			written++
 			fmt.Fprintf(out, "%s: restored to %s — local edits discarded, make the change at its origin\n",
 				r.Path, shortSHA(r.Commit))
+		case r.State == nil:
+			// See printCheckReports: a file the run abandoned rather than judged.
 		case r.Written:
 			written++
 			fmt.Fprintf(out, "%s: %s → %s at %s\n",
@@ -384,7 +394,7 @@ func tally(reports []deps.Report) (reached, failed, skipped int) {
 			skipped++
 		case r.Err != nil:
 			failed++
-		default:
+		case r.State != nil:
 			reached++
 		}
 	}

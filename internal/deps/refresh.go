@@ -149,12 +149,15 @@ func survey(ctx context.Context, opts surveyOptions) ([]Report, error) {
 	reports := make([]Report, 0, len(opts.paths))
 	for _, p := range opts.paths {
 		rep, err := visit(ctx, runner, p, opts)
-		reports = append(reports, rep)
 		if err != nil {
 			// gh itself is unusable, so every file left would fail identically.
-			// Stop, and hand back what was learned before it.
+			// Stop, and hand back what was learned before this one. The file
+			// that hit it gets no Report: it was abandoned mid-flight, so it has
+			// neither a verdict nor a per-file failure to report, and the error
+			// returned here is the whole story.
 			return reports, err
 		}
+		reports = append(reports, rep)
 	}
 	return reports, nil
 }
