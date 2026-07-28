@@ -120,6 +120,54 @@ and authenticated. The command writes the file and prints the `imports:` entry
 to add — it does not edit your model. It refuses to overwrite a file at the
 destination that is not an earlier copy of the same model.
 
+### `modelith deps check <file>...`
+
+Reports which vendored copies have fallen behind their origins. Writes nothing,
+and exits non-zero when any copy is stale — or when one could not be reached,
+since not being able to tell is not evidence that it is current.
+
+```sh
+modelith deps check docs/*.modelith.yaml
+```
+
+A copy is stale when its origin serves different content, compared against the
+digest in the copy's own header. A commit that touched the path without
+changing the file is not a change. Whether a copy *here* has been hand-edited
+is a different question, and `lint` answers it offline.
+
+Every line names the ref it checked against, because a copy pinned to a tag is
+up to date for as long as that tag points where it did — modelith does not look
+for newer releases.
+
+### `modelith deps update [--ref <ref>] <file>...`
+
+Brings vendored copies forward to what their origins serve.
+
+```sh
+modelith deps update docs/*.modelith.yaml
+modelith deps update --ref v2.2.0 docs/payments.modelith.yaml
+```
+
+| Argument / flag | Meaning |
+|---|---|
+| `<file>...` | Vendored copies to update. Files with no provenance header are skipped. |
+| `--ref` | Re-pin the copy to this ref. Applies to **one file**: a single ref names a different version in every other repository. |
+
+A copy whose origin has not moved is left byte for byte alone, so running this
+over a glob produces a diff only where something changed. A copy that was
+hand-edited is not holding what its origin serves, so it is rewritten and the
+edits go.
+
+It writes the copies and nothing else — it does not edit any model's `imports:`
+and it does not lint. Run `modelith lint` afterwards: an item a copy used to
+define may have been renamed or removed upstream, which breaks references
+`update` cannot see.
+
+Both commands take file arguments the way `lint` does and skip files with no
+provenance header, so the glob you already lint works unchanged. Find your
+copies with `git grep -l '# modelith-vendored'`.
+
 See [Vendoring a model from another
 repository](./10-vendoring.md) for what the header records, how a vendored file
-is linted differently, and why vendoring fetches one file rather than a tree.
+is linted differently, how the two tracking modes differ, and why vendoring
+fetches one file rather than a tree.
