@@ -1,7 +1,7 @@
 ---
 sidebar_position: 10
 title: Vendoring a model from another repository
-description: Copy a model from another repository, keep track of where it came from, and reference its items.
+description: Copy a model from another repository, reference its items, and keep the copy current as its origin moves on.
 ---
 
 # Vendoring a model from another repository
@@ -140,25 +140,114 @@ header. If someone edits the copy, lint says so:
 ```
 error [semantic] (root): this vendored file no longer matches the digest its
 provenance header records (recorded sha256:9a1f…, computed sha256:2c7b…) — it
-has been edited since it was imported. Refresh it with `modelith deps import
-https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml`, or
-delete the provenance header if the change is a deliberate fork, which makes
-this repository the file's home.
+has been edited since it was imported. Restore it with `modelith deps update
+docs/payments.modelith.yaml`, or delete the provenance header if the change is
+a deliberate fork, which makes this repository the file's home.
 ```
 
-Both remedies are real. Re-running `deps import` replaces the copy with what
-upstream has now. Deleting the header makes the file an ordinary model of
-yours — an honest description of having forked it, and it re-enables the
-completeness checks, because now it *is* your document.
+Both remedies are real. `deps update` puts the copy back to what its origin
+serves — and if the origin has not moved, that is byte for byte what the import
+wrote. Deleting the header makes the file an ordinary model of yours — an
+honest description of having forked it, and it re-enables the completeness
+checks, because now it *is* your document.
 
 This is drift detection, not a security boundary: anyone editing the file can
 recompute the header. It catches the well-meaning typo fix, which is the thing
 that actually happens.
 
+## Keeping the copy current
+
+The section above is about your copy. This one is about the model it came from,
+which moves on without you.
+
+```sh
+modelith deps check docs/*.modelith.yaml
+```
+
+```
+docs/payments.modelith.yaml: up to date at v2.1.0
+docs/ledger.modelith.yaml: stale at main — the origin is now at a91b0c3
+
+checked 2 vendored copies, 1 stale
+```
+
+`deps check` writes nothing and exits non-zero when any copy is stale, so it
+works as a scheduled CI job. `deps update` takes the same arguments and brings
+the copies forward:
+
+```sh
+modelith deps update docs/ledger.modelith.yaml
+```
+
+```
+docs/ledger.modelith.yaml: 4f2c1e9 → a91b0c3 at main
+
+updated 1 of 1 vendored copy
+```
+
+Then read `git diff` to see what actually changed, and run `modelith lint`. An
+item the copy used to define may have been renamed or removed upstream, which
+breaks references in *your* model — `update` cannot see those, because it does
+not know which of your models import the copy.
+
+Both commands take file arguments, the same way `lint` does, and skip any file
+with no provenance header. That means the glob you already lint works
+unchanged; the closing line tells you how many files were skipped, so a glob
+that matched none of your copies does not read as good news. To find them:
+
+```sh
+git grep -l '# modelith-vendored'
+```
+
+### Two ways to track a model
+
+Which one you are on is whatever `# modelith-ref:` records.
+
+- **Tracking a branch.** `deps update` fetches whatever that branch has now.
+  You get upstream's changes as they land, and `deps check` tells you when
+  there are some.
+- **Pinned to a tag.** `deps update` alone does nothing, because the tag still
+  points where it did. Moving to a new version is explicit:
+
+  ```sh
+  modelith deps update --ref v2.2.0 docs/payments.modelith.yaml
+  ```
+
+  `--ref` re-pins one copy at a time. A single ref names a different version in
+  every other repository, so it is refused with several files.
+
+:::note[A pinned copy is always "up to date"]
+
+`deps check` compares content against the ref your header records. On a tag,
+that never changes, so a copy pinned to `v2.1.0` reports as up to date for as
+long as `v2.1.0` exists — even after `v2.3.0` ships. modelith does not look for
+newer releases, which is why every line of output names the ref it checked
+against.
+
+:::
+
+### What "stale" means
+
+A copy is stale when its origin serves **different content**, compared against
+the digest in the copy's own header. It is not a commit comparison: a merge or
+a whitespace-only touch upstream moves the commit without changing the model,
+and that is not something you need to act on.
+
+That has one consequence worth knowing: an upstream change to a `description:`
+counts, because the digest covers the whole file. You will be told a
+documentation-only change is waiting for you, and `git diff` after the update
+is how you find out that is all it was.
+
+`deps update` writes only where something changed, so running it over a glob
+produces a diff exactly where one belongs. A copy that was hand-edited is not
+holding what its origin serves, so it gets rewritten too, and the edits go —
+make the change at the origin instead.
+
 ## Vendoring is one file, not a dependency tree
 
 If the model you fetch imports models of its own, **those are not fetched**.
-`deps import` tells you they exist:
+`deps import` tells you they exist, and `deps update` says the same thing again
+if a refresh brings imports the copy did not have before:
 
 ```
 Note: payments.modelith.yaml declares an import of its own (./ledger.modelith.yaml).
@@ -198,8 +287,13 @@ already solves.
 - **`lint` and `render` never touch the network**, whatever you pass them
   ([ADR-0011](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0011-network-boundary.md)).
   Everything under `modelith deps` is opt-in, and nothing else fetches.
+- **No newer-release detection.** `deps check` tells you whether the ref you
+  pinned still serves what you have. It does not tell you a newer tag exists,
+  because deciding which tags count as newer means guessing at a versioning
+  scheme modelith has no way to know.
 
 The design and its trade-offs are
-[ADR-0010](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0010-cross-model-references-by-vendoring.md)
+[ADR-0010](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0010-cross-model-references-by-vendoring.md),
+[ADR-0015](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0015-vendoring-is-a-whole-file-copy.md),
 and
-[ADR-0015](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0015-vendoring-is-a-whole-file-copy.md).
+[ADR-0016](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0016-staleness-is-a-content-comparison.md).
