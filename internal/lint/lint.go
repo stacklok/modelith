@@ -90,7 +90,7 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 	// Whether this file is somebody else's copy is settled first: it decides
 	// which of the layers below are findings about a model this repository
 	// controls, and it holds even when the file does not parse.
-	vendored := runProvenance(src, res)
+	vendored := runProvenance(path, src, res)
 
 	// Layer 1: structural validation against the JSON Schema.
 	structuralOK, entityScopes := runStructural(src, res)
