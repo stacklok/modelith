@@ -104,7 +104,7 @@ A vendored model is a copy of a model whose home is elsewhere, committed here
 and marked with a provenance header. Commands in this group are the only ones
 that use the network; lint and render never do.`),
 	}
-	cmd.AddCommand(depsImportCmd())
+	cmd.AddCommand(depsImportCmd(), depsCheckCmd(), depsUpdateCmd())
 	return cmd
 }
 
@@ -186,18 +186,238 @@ func printImportResult(out, errOut io.Writer, res *deps.Result, wd string) {
 	fmt.Fprintf(out, "\nAdd it to the model that references it, as a path relative to that model "+
 		"(this one is relative to the current directory):\n\n"+
 		"  imports:\n    - %s\n", importEntry(res.Path, wd))
-	if n := len(res.TheirImports); n > 0 {
-		declares := fmt.Sprintf("declares %d imports of its own", n)
-		if n == 1 {
-			declares = "declares an import of its own"
-		}
-		fmt.Fprintf(out, "\nNote: %s %s (%s).\n"+
-			"modelith vendors one file, not a dependency tree, and resolution is not\n"+
-			"transitive — if you need items from those models, import them directly.\n",
-			name, declares, strings.Join(res.TheirImports, ", "))
+	printTransitiveNote(out, name, res.TheirImports, "declares")
+	printTrustWarning(errOut)
+}
+
+// printTransitiveNote says that a model reaches for models of its own and that
+// modelith did not follow them. verb differs between a first import, where the
+// imports are simply what the model has, and an update, where they are what it
+// gained since the copy on disk was taken.
+func printTransitiveNote(out io.Writer, name string, imports []string, verb string) {
+	n := len(imports)
+	if n == 0 {
+		return
 	}
+	declares := fmt.Sprintf("%s %d imports of its own", verb, n)
+	if n == 1 {
+		declares = fmt.Sprintf("%s an import of its own", verb)
+	}
+	fmt.Fprintf(out, "\nNote: %s %s (%s).\n"+
+		"modelith vendors one file, not a dependency tree, and resolution is not\n"+
+		"transitive — if you need items from those models, import them directly.\n",
+		name, declares, strings.Join(imports, ", "))
+}
+
+// printTrustWarning is ADR-0014's warning, printed whenever third-party content
+// lands in the repository. That an origin was trusted at import time says
+// nothing about the commit that landed since, so an update repeats it.
+func printTrustWarning(errOut io.Writer) {
 	fmt.Fprint(errOut, "\nWarning: a vendored model is untrusted content that will be rendered\n"+
 		"into your published Markdown. Only vendor from sources you trust.\n")
+}
+
+func depsCheckCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "check <file>...",
+		Short: "Report which vendored copies have fallen behind their origin",
+		Long: strings.TrimSpace(`
+Report which vendored copies have fallen behind their origin.
+
+A copy is stale when its origin now serves different content, compared against
+the digest the copy's own header records. A file with no provenance header is
+skipped, so the glob you already pass to lint works here unchanged; a closing
+line says how many were skipped. Exits non-zero when any copy is stale.
+
+This command answers what the origin has done. Whether a copy here has been
+hand-edited is a different question, and modelith lint answers it offline.
+
+A copy pinned to a tag is reported as up to date for as long as that tag points
+where it did; modelith does not look for newer releases. Every line names the
+ref it was checked against.
+
+Fetching is delegated to the gh CLI, which must be installed and authenticated.
+Nothing is written.`),
+		Example: strings.TrimSpace(`
+  modelith deps check docs/payments.modelith.yaml
+  modelith deps check docs/*.modelith.yaml`),
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reports, err := deps.Check(cmd.Context(), deps.CheckOptions{Paths: args})
+			blocking := printCheckReports(cmd.OutOrStdout(), cmd.ErrOrStderr(), reports)
+			if err != nil {
+				return err
+			}
+			if blocking {
+				return errBlocking
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+func depsUpdateCmd() *cobra.Command {
+	var ref string
+	cmd := &cobra.Command{
+		Use:   "update <file>...",
+		Short: "Bring vendored copies forward to what their origins serve",
+		Long: strings.TrimSpace(`
+Bring vendored copies forward to what their origins serve.
+
+A copy whose origin has not moved is left byte for byte alone, so running this
+over a glob produces a diff only where something actually changed. A copy that
+was hand-edited is not holding what its origin serves, so it is rewritten and
+the edits are discarded — make the change at the origin instead.
+
+--ref re-pins one copy to a different tag or branch, which is how a pinned copy
+moves; a copy tracking a branch moves on a bare update. It applies to exactly
+one file, because one ref names a different version in every other repository.
+
+This command writes the copies and nothing else. It does not edit any model's
+imports list, and it does not lint: an item a copy used to define may have been
+renamed or removed upstream, and modelith lint is what reports that from the
+importing model's seat.
+
+Fetching is delegated to the gh CLI, which must be installed and authenticated.`),
+		Example: strings.TrimSpace(`
+  modelith deps update docs/payments.modelith.yaml
+  modelith deps update docs/*.modelith.yaml
+  modelith deps update --ref v2.2.0 docs/payments.modelith.yaml`),
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reports, err := deps.Update(cmd.Context(), deps.UpdateOptions{
+				Paths: args,
+				Ref:   ref,
+				Now:   time.Now(),
+			})
+			blocking := printUpdateReports(cmd.OutOrStdout(), cmd.ErrOrStderr(), reports)
+			if err != nil {
+				return err
+			}
+			if blocking {
+				return errBlocking
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&ref, "ref", "", "re-pin the copy to this ref (one file only)")
+	return cmd
+}
+
+// printCheckReports reports a check run and says whether it should exit
+// non-zero: a stale copy or a copy that could not be reached both qualify.
+func printCheckReports(out, errOut io.Writer, reports []deps.Report) bool {
+	stale := 0
+	for i := range reports {
+		r := &reports[i]
+		switch {
+		case r.Skipped:
+		case r.Err != nil:
+			fmt.Fprintf(errOut, "%s: %v\n", r.Path, r.Err)
+		case r.Stale():
+			stale++
+			fmt.Fprintf(out, "%s: stale at %s — the origin is now at %s\n",
+				r.Path, r.State.Ref, shortSHA(r.Commit))
+		default:
+			fmt.Fprintf(out, "%s: up to date at %s\n", r.Path, r.State.Ref)
+		}
+	}
+	reached, failed, skipped := tally(reports)
+	line := fmt.Sprintf("checked %s, %d stale", plural(reached, "vendored copy", "vendored copies"), stale)
+	if stale == 0 && reached > 0 {
+		line = fmt.Sprintf("checked %s, all up to date", plural(reached, "vendored copy", "vendored copies"))
+	}
+	printSummary(out, line, failed, skipped)
+	return stale > 0 || failed > 0
+}
+
+// printUpdateReports reports an update run. A failure exits non-zero; a copy
+// that was merely stale does not, because it is no longer stale.
+func printUpdateReports(out, errOut io.Writer, reports []deps.Report) bool {
+	written := 0
+	for i := range reports {
+		r := &reports[i]
+		switch {
+		case r.Skipped:
+		case r.Err != nil:
+			fmt.Fprintf(errOut, "%s: %v\n", r.Path, r.Err)
+		case r.Restored:
+			written++
+			fmt.Fprintf(out, "%s: restored to %s — local edits discarded, make the change at its origin\n",
+				r.Path, shortSHA(r.Commit))
+		case r.Written:
+			written++
+			fmt.Fprintf(out, "%s: %s → %s at %s\n",
+				r.Path, shortSHA(r.State.Header.Commit), shortSHA(r.Commit), r.State.Ref)
+		default:
+			fmt.Fprintf(out, "%s: up to date at %s\n", r.Path, r.State.Ref)
+		}
+	}
+	reached, failed, skipped := tally(reports)
+	printSummary(out, fmt.Sprintf("updated %d of %s", written,
+		plural(reached, "vendored copy", "vendored copies")), failed, skipped)
+
+	if written == 0 {
+		// Nothing arrived, so there is nothing to warn about and nothing whose
+		// vocabulary can have moved under the models that import it.
+		return failed > 0
+	}
+	for i := range reports {
+		if r := &reports[i]; len(r.NewImports) > 0 {
+			printTransitiveNote(out, filepath.Base(r.Path), r.NewImports, "now declares")
+		}
+	}
+	fmt.Fprint(out, "\nRun `modelith lint` on the models that import these copies. An item a copy\n"+
+		"used to define may have been renamed or removed upstream, which breaks a\n"+
+		"reference this command cannot see.\n")
+	printTrustWarning(errOut)
+	return failed > 0
+}
+
+// tally counts what a run covered: copies reached, files that failed, and files
+// that carried no provenance header.
+func tally(reports []deps.Report) (reached, failed, skipped int) {
+	for i := range reports {
+		switch r := &reports[i]; {
+		case r.Skipped:
+			skipped++
+		case r.Err != nil:
+			failed++
+		default:
+			reached++
+		}
+	}
+	return reached, failed, skipped
+}
+
+// printSummary closes a run with what it covered, so a user whose glob matched
+// the wrong files is not told "all up to date" about nothing.
+func printSummary(out io.Writer, line string, failed, skipped int) {
+	if failed > 0 {
+		line += fmt.Sprintf(", %s could not be reached", plural(failed, "file", "files"))
+	}
+	if skipped > 0 {
+		line += fmt.Sprintf("; skipped %s with no provenance header", plural(skipped, "file", "files"))
+	}
+	fmt.Fprintf(out, "\n%s\n", line)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// shortSHA abbreviates a commit for a line a human reads. Two 40-character
+// SHAs either side of an arrow is a line nobody reads, and the full value is in
+// the file's header a moment later.
+func shortSHA(s string) string {
+	if len(s) > 7 {
+		return s[:7]
+	}
+	return s
 }
 
 // importEntry writes a path the way an `imports:` entry is written: relative,
