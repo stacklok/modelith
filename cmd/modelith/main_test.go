@@ -629,6 +629,19 @@ func TestDepsCheckOutput(t *testing.T) {
 			t.Error("a run where nothing could be reached exited zero")
 		}
 	})
+
+	// survey does not produce a Report with neither a verdict nor a failure —
+	// but one reached the printer once and took the whole command down with a
+	// nil dereference. A command whose job is reporting calmly on other
+	// people's files must not be the thing that crashes.
+	t.Run("a report with no verdict is not a crash", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		printCheckReports(&out, &errOut, []deps.Report{{Path: "abandoned.modelith.yaml"}})
+		printUpdateReports(&out, &errOut, []deps.Report{{Path: "abandoned.modelith.yaml"}})
+		if strings.Contains(out.String(), "1 vendored copy") {
+			t.Errorf("an unjudged file was counted as reached:\n%s", out.String())
+		}
+	})
 }
 
 func TestDepsUpdateOutput(t *testing.T) {
@@ -696,9 +709,15 @@ func TestDepsRejectsBadArguments(t *testing.T) {
 	theirs := writeTemp(t, dir, "theirs.modelith.yaml", minimalValid)
 
 	t.Run("--ref across several copies is refused", func(t *testing.T) {
-		_, err := run(t, "deps", "update", "--ref", "v2.2.0", ours, theirs)
+		out, err := run(t, "deps", "update", "--ref", "v2.2.0", ours, theirs)
 		if err == nil || !strings.Contains(err.Error(), "--ref re-pins one copy") {
 			t.Fatalf("want a refusal naming the flag, got %v", err)
+		}
+		// A run refused before it started has nothing to summarise. Printing
+		// "updated 0 of 0 vendored copies" above the reason reads as the
+		// outcome of a run that happened.
+		if strings.Contains(out, "vendored cop") {
+			t.Errorf("a refused run printed a summary:\n%s", out)
 		}
 	})
 

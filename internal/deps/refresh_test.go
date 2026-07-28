@@ -233,8 +233,12 @@ func TestSurvey_StopsWhenTheToolIsUnusable(t *testing.T) {
 	if !errors.Is(err, ErrToolUnavailable) {
 		t.Fatalf("Check returned %v, want an ErrToolUnavailable", err)
 	}
-	if len(reports) != 1 {
-		t.Errorf("got %d reports, want the run to stop after the first: %+v", len(reports), reports)
+	// The file that hit it gets no Report. It was abandoned mid-flight, so it
+	// has neither a verdict nor a per-file failure, and a Report carrying
+	// neither is a hole every consumer has to remember to check — one of them
+	// did not, and dereferenced its nil State.
+	if len(reports) != 0 {
+		t.Errorf("got %d reports, want none — the run never judged a file: %+v", len(reports), reports)
 	}
 	if r.calls != 1 {
 		t.Errorf("the run made %d calls after gh proved unusable, want 1", r.calls)
