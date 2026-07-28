@@ -16,7 +16,7 @@ import (
 // dropOwnedDiagnostics, and the errors its own imports list would raise, in
 // loadImports. Structural and semantic checks still run: a vendored file that is
 // not a valid domain model breaks this repo's build and is this repo's problem.
-func runProvenance(src []byte, res *Result) bool {
+func runProvenance(path string, src []byte, res *Result) bool {
 	h, problems := provenance.Parse(src)
 	if h == nil {
 		return false
@@ -43,22 +43,26 @@ func runProvenance(src []byte, res *Result) bool {
 				Category: CategorySemantic,
 				Path:     "",
 				Message: fmt.Sprintf(
-					"this vendored file no longer matches the digest its provenance header records (recorded %s, computed %s) — it has been edited since it was imported. Refresh it with `modelith deps import %s`, or delete the provenance header if the change is a deliberate fork, which makes this repository the file's home",
-					h.Digest, got, refreshTarget(h)),
+					"this vendored file no longer matches the digest its provenance header records (recorded %s, computed %s) — it has been edited since it was imported. Restore it with `modelith deps update %s`, or delete the provenance header if the change is a deliberate fork, which makes this repository the file's home",
+					h.Digest, got, refreshTarget(path)),
 			})
 		}
 	}
 	return true
 }
 
-// refreshTarget is what to hand `modelith deps import` to replace this copy. For
-// a git origin that is the blob URL the header's parts describe; for anything
-// else the origin alone, which is all such a method records.
-func refreshTarget(h *provenance.Header) string {
-	if h.Fetch == "git" && h.Origin != "" && h.Ref != "" && h.Path != "" {
-		return fmt.Sprintf("%s/blob/%s/%s", h.Origin, h.Ref, h.Path)
+// refreshTarget is what to hand `modelith deps update` to restore this copy:
+// its own path. The header already records where the file came from, so the
+// remedy needs nothing the user has to assemble by hand — and restoring a copy
+// whose origin has not moved rewrites it to exactly the bytes the import wrote.
+//
+// A model read from stdin has no path to offer, in which case the remedy names
+// the file generically rather than a path that would not work.
+func refreshTarget(path string) string {
+	if path == "" {
+		return "<this file>"
 	}
-	return h.Origin
+	return path
 }
 
 // dropOwnedDiagnostics removes the findings that are about a model's own

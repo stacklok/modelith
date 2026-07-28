@@ -187,8 +187,12 @@ func TestVendored_DigestMismatch(t *testing.T) {
 		if found.Severity != SeverityError {
 			t.Errorf("digest mismatch is a %s, want an error", found.Severity)
 		}
+		// The remedy names this file's own path, not a URL the user would have
+		// to assemble: the header already records where the copy came from, and
+		// restoring a copy whose origin has not moved rewrites it to exactly
+		// the bytes the import wrote.
 		for _, want := range []string{
-			"modelith deps import https://github.com/stacklok/some-repo/blob/main/docs/payments.modelith.yaml",
+			"modelith deps update docs/garage.modelith.yaml",
 			"delete the provenance header",
 		} {
 			if !strings.Contains(found.Message, want) {
