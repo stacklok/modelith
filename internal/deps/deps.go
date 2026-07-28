@@ -51,15 +51,45 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 	out, err := cmd.Output()
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return nil, fmt.Errorf("%s is not installed — modelith delegates fetching to it; install it from https://cli.github.com and run `%s auth login`", name, name)
+			return nil, unusable{fmt.Errorf("%s is not installed — modelith delegates fetching to it; install it from https://cli.github.com and run `%s auth login`", name, name)}
 		}
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
+			failed := fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
+			if unauthenticated(msg) {
+				return nil, unusable{failed}
+			}
+			return nil, failed
 		}
 		return nil, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
 	return out, nil
 }
+
+// unauthenticated reports whether gh refused for want of credentials rather
+// than because of anything about the request.
+//
+// It matches gh's own text because gh is a separate program: it reports this on
+// stderr and exits 1, with no typed error to unwrap and no distinguishing exit
+// code. The three needles are the ones gh's binary actually carries — "gh auth
+// login" appears in every logged-out message, "GH_TOKEN" in the two automation
+// ones, and HTTP 401 is a token that exists and is refused. Reading it wrong
+// costs a batch that stops when it could have continued, or one that repeats
+// the same paragraph per file.
+func unauthenticated(msg string) bool {
+	for _, needle := range []string{"gh auth login", "GH_TOKEN", "HTTP 401"} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// unusable marks a failure of the tool itself rather than of the request, so
+// errors.Is(err, ErrToolUnavailable) reports true without the sentinel's text
+// appearing in the message the user reads.
+type unusable struct{ error }
+
+func (unusable) Is(target error) bool { return target == ErrToolUnavailable }
 
 // Source is a model file in another repository, as an origin URL parsed into
 // the parts a fetch and a later refresh both need.
