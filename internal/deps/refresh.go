@@ -54,9 +54,11 @@ func (s *State) Edited() bool { return provenance.Digest(s.Local) != s.Header.Di
 func (s *State) Repinned() bool { return s.Ref != s.Header.Ref }
 
 // Current reports whether the copy on disk already holds what the origin
-// serves. With Repinned it is the whole write condition for deps update: a
-// hand-edited copy is not current whatever the origin did, so updating it
-// restores it, and no case needs a branch of its own (ADR-0016).
+// serves. It is not on its own the condition for leaving a copy alone: content
+// can match the origin while the header still describes an older version — a
+// merge that took the incoming content and kept the recorded header — and that
+// copy needs its header brought forward even though its bytes are already
+// right. Edited is what catches it (ADR-0016).
 func (s *State) Current() bool { return provenance.Digest(s.Local) == provenance.Digest(s.Upstream) }
 
 // Report is what happened to one file in a check or update run.
@@ -68,7 +70,14 @@ type Report struct {
 	Skipped bool
 	// Err is why this file could not be checked. The run continues past it.
 	Err error
-	// State is nil when the file was skipped or failed.
+	// CommitErr is why the origin's current commit could not be resolved. It is
+	// not a failure of the check: the verdict rests on the digest comparison,
+	// which was already made, so the verdict stands and only the commit named
+	// alongside it is missing.
+	CommitErr error
+	// State is nil when the file was skipped, or when the run failed before it
+	// could measure the copy against its origin. A Report can carry both a
+	// State and an Err: the copy was measured, and then writing it failed.
 	State *State
 	// Written says update rewrote the file. Restored distinguishes the two
 	// reasons it might have: a new version arrived, or only the copy on disk
@@ -113,7 +122,8 @@ type UpdateOptions struct {
 // CI and against a read-only checkout.
 //
 // A per-file failure lands in that file's Report and the run continues. A
-// non-nil error means the run stopped early — only gh being unusable does that.
+// non-nil error means the run stopped before it could measure a file because gh
+// was unusable while fetching its content.
 func Check(ctx context.Context, opts CheckOptions) ([]Report, error) {
 	return survey(ctx, surveyOptions{paths: opts.Paths, run: opts.Run})
 }
@@ -150,11 +160,9 @@ func survey(ctx context.Context, opts surveyOptions) ([]Report, error) {
 	for _, p := range opts.paths {
 		rep, err := visit(ctx, runner, p, opts)
 		if err != nil {
-			// gh itself is unusable, so every file left would fail identically.
-			// Stop, and hand back what was learned before this one. The file
-			// that hit it gets no Report: it was abandoned mid-flight, so it has
-			// neither a verdict nor a per-file failure to report, and the error
-			// returned here is the whole story.
+			// visit returns an error only when it cannot continue the run. The
+			// file that hit it gets no Report, and the error returned here is the
+			// whole story.
 			return reports, err
 		}
 		reports = append(reports, rep)
@@ -229,10 +237,13 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 		if st.Moved() {
 			commit, err := fetchCommit(ctx, runner, src)
 			if err != nil {
-				if errors.Is(err, ErrToolUnavailable) {
-					return rep, err
-				}
-				rep.Err = err
+				// Not rep.Err: this copy was reached and measured, and the
+				// verdict that measurement produced is what check exists to
+				// report. Retracting it because the commit to name alongside it
+				// could not be resolved would report a file as unreachable that
+				// was reached, and as unjudged when it was judged.
+				rep.CommitErr = err
+				return rep, nil
 			}
 			rep.Commit = commit
 		}
@@ -240,7 +251,13 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 	}
 
 	switch {
-	case st.Current() && !st.Repinned():
+	case st.Current() && !st.Edited() && !st.Repinned():
+		// Nothing to do: the content matches the origin and the header
+		// describes that same content. Edited is not redundant with Current
+		// here — a copy whose content matches the origin while its header
+		// records an older version is a copy lint rejects for a digest
+		// mismatch, and skipping it would leave update with no answer to the
+		// very repair lint sends the user here for.
 		return rep, nil
 
 	case !st.Moved() && !st.Repinned():
@@ -295,6 +312,11 @@ func write(path string, content []byte, h *provenance.Header) error {
 // that escapePath depends on to keep an endpoint inside the repository's
 // contents namespace. Passing ref explicitly is what lets a ref containing a
 // slash split correctly, which is knowable here and is not from a URL alone.
+//
+// The ref and path go back in escaped. What a header records is what ParseSource
+// decoded out of a URL, so handing them over raw would ask url.Parse to read a
+// literal "%" as the start of an escape and a literal "?" as the start of a
+// query: a path a first import accepted would then fail every refresh after it.
 func sourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 	if h.Fetch != "git" {
 		// Unreachable while git is the only method, but a header naming a
@@ -304,7 +326,7 @@ func sourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 			"modelith cannot refresh a copy fetched with %q — this build knows how to fetch %s",
 			h.Fetch, strings.Join(provenance.Methods(), ", "))
 	}
-	return ParseSource(fmt.Sprintf("%s/blob/%s/%s", strings.TrimSuffix(h.Origin, "/"), ref, h.Path), ref)
+	return ParseSource(fmt.Sprintf("%s/blob/%s/%s", normOrigin(h.Origin), escapePath(ref), escapePath(h.Path)), ref)
 }
 
 // checkFetched applies to a refetch the same two refusals import applies to a

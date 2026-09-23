@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stacklok/modelith/internal/provenance"
 )
 
 // laterSHA is the commit an origin has moved to. It differs from sha in every
@@ -446,6 +448,189 @@ func TestUpdate_ReportsImportsItDidNotFollow(t *testing.T) {
 	}
 }
 
+// TestADR_0017_HeaderDigestMismatchRequiresUpdate pins the case a write
+// condition resting on Current alone gets wrong, and gets wrong permanently.
+//
+// A merge is the ordinary way in: the incoming side changes the model and the
+// resolution takes that content while keeping the header block already in the
+// file. The copy now holds exactly what the origin serves, so it is Current,
+// while its header still records the version before — which is the digest
+// mismatch lint reports and sends the user here to repair. Skipping it left
+// update saying "up to date" about a file check called stale and lint called
+// tampered with, with nothing in any of the three messages naming a way out.
+func TestADR_0017_HeaderDigestMismatchRequiresUpdate(t *testing.T) {
+	t.Parallel()
+
+	path, r := vendored(t, upstream)
+	h, problems := provenance.Parse([]byte(readFile(t, path)))
+	if len(problems) > 0 {
+		t.Fatalf("the fixture's own header is unusable: %v", problems)
+	}
+	// The origin moved, and the content — and only the content — came across.
+	r.content, r.sha = moved, laterSHA
+	if err := os.WriteFile(path, provenance.Stamp([]byte(moved), h), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := update(t, r, "", path)[0]
+	if rep.Err != nil {
+		t.Fatal(rep.Err)
+	}
+	if !rep.Written {
+		t.Fatal("update left a copy whose header describes a version its content is not")
+	}
+	after := readFile(t, path)
+	for _, want := range []string{
+		"# modelith-commit: " + laterSHA,
+		"# modelith-imported: 2026-07-28",
+	} {
+		if !strings.Contains(after, want) {
+			t.Errorf("the repaired copy does not contain %q:\n%s", want, after)
+		}
+	}
+	// The repair is the point: the copy now verifies against its own header,
+	// which is what clears the lint error that sent the user here.
+	rep = check(t, r, path)[0]
+	if rep.Stale() || rep.State.Edited() {
+		t.Errorf("after update: Stale=%v Edited=%v, want both false", rep.Stale(), rep.State.Edited())
+	}
+}
+
+// TestCheck_KeepsItsVerdictWhenOnlyTheCommitIsUnresolvable pins that the commit
+// is decoration on a verdict rather than part of it. The digest comparison has
+// already been made by the time the SHA is asked for, so failing to resolve it
+// must not turn a copy that was reached and judged into one reported as
+// unreachable and unjudged.
+func TestCheck_KeepsItsVerdictWhenOnlyTheCommitIsUnresolvable(t *testing.T) {
+	t.Parallel()
+
+	path, r := vendored(t, upstream)
+	r.content, r.sha = moved, laterSHA
+	r.fail = "/commits"
+
+	rep := check(t, r, path)[0]
+	if rep.Err != nil {
+		t.Errorf("Err = %v, want nil — the copy was reached and measured", rep.Err)
+	}
+	if rep.State == nil {
+		t.Fatal("State is nil, so the verdict was retracted along with the commit")
+	}
+	if !rep.Stale() {
+		t.Error("the stale verdict did not survive the commit lookup failing")
+	}
+	if rep.CommitErr == nil {
+		t.Error("CommitErr is nil, so the failure went unreported")
+	}
+	if rep.Commit != "" {
+		t.Errorf("Commit = %q, want empty — nothing resolved it", rep.Commit)
+	}
+}
+
+func TestCheck_KeepsItsVerdictWhenTheCommitToolIsUnusable(t *testing.T) {
+	t.Parallel()
+
+	path, r := vendored(t, upstream)
+	r.content, r.sha, r.unusable = moved, laterSHA, "/commits"
+
+	reports, err := Check(context.Background(), CheckOptions{Paths: []string{path}, Run: r})
+	if err != nil {
+		t.Fatalf("Check returned %v, want nil", err)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("got %d reports, want 1: %+v", len(reports), reports)
+	}
+	rep := reports[0]
+	if rep.State == nil {
+		t.Fatal("State is nil, so the measured verdict was discarded")
+	}
+	if !rep.Stale() {
+		t.Error("the stale verdict did not survive gh becoming unusable for the commit lookup")
+	}
+	if !errors.Is(rep.CommitErr, ErrToolUnavailable) {
+		t.Errorf("CommitErr = %v, want an ErrToolUnavailable", rep.CommitErr)
+	}
+	if rep.Commit != "" {
+		t.Errorf("Commit = %q, want empty — nothing resolved it", rep.Commit)
+	}
+}
+
+// TestSourceFromHeader_RoundTripsWhatParseSourceDecoded pins that a header's
+// path and ref survive being rebuilt into a URL. ParseSource hands back the
+// decoded forms and the header records those, so re-serialising them raw asks
+// url.Parse to read a literal "%" as an escape and a literal "?" as a query:
+// the copy imports once and then fails every refresh after it.
+func TestSourceFromHeader_RoundTripsWhatParseSourceDecoded(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		path string
+		ref  string
+	}{
+		{name: "an ordinary path", path: "docs/payments.modelith.yaml", ref: "main"},
+		{name: "a percent", path: "docs/100%.modelith.yaml", ref: "main"},
+		{name: "a space and an ampersand", path: "docs/a b&c/payments.modelith.yaml", ref: "main"},
+		{name: "a question mark", path: "docs/q?.modelith.yaml", ref: "main"},
+		{name: "a hash", path: "docs/c#1.modelith.yaml", ref: "main"},
+		{name: "a slashed ref", path: "docs/payments.modelith.yaml", ref: "release/v2"},
+		{name: "a percent in the ref", path: "docs/payments.modelith.yaml", ref: "wip%2"},
+		{name: "an origin a hand wrote with a trailing slash", path: "docs/payments.modelith.yaml", ref: "main"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			origin := "https://github.com/acme/billing"
+			if strings.Contains(tc.name, "trailing slash") {
+				origin += "/"
+			}
+			h := &provenance.Header{Fetch: "git", Origin: origin, Path: tc.path, Ref: tc.ref}
+			got, err := sourceFromHeader(h, tc.ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := Source{
+				Origin: "https://github.com/acme/billing", Owner: "acme", Repo: "billing",
+				Ref: tc.ref, Path: tc.path,
+			}
+			if got != want {
+				t.Errorf("sourceFromHeader() = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestCheck_FollowsAPathThatNeededEscaping walks the whole loop for the case
+// the round trip above isolates: a file whose name an import accepted has to
+// stay checkable and updatable afterwards.
+func TestCheck_FollowsAPathThatNeededEscaping(t *testing.T) {
+	t.Parallel()
+
+	r := &fakeRunner{content: upstream, sha: sha}
+	res, err := Import(context.Background(), Options{
+		URL: "https://github.com/acme/billing/blob/main/docs/100%25.modelith.yaml",
+		Dir: t.TempDir(), Now: importedAt, Run: r,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := res.Header; h.Path != "docs/100%.modelith.yaml" {
+		t.Fatalf("the header records path %q, want the decoded form", h.Path)
+	}
+	r.calls = nil
+
+	rep := check(t, r, res.Path)[0]
+	if rep.Err != nil {
+		t.Fatalf("a copy this import wrote could not be checked: %v", rep.Err)
+	}
+	if rep.Stale() {
+		t.Error("reported stale against an origin serving the same bytes")
+	}
+	const wantContents = "repos/acme/billing/contents/docs/100%25.modelith.yaml?ref=main"
+	if got := r.calls[0][len(r.calls[0])-1]; got != wantContents {
+		t.Errorf("content endpoint = %q, want %q", got, wantContents)
+	}
+}
+
 // TestVisit_RefusesAnUnusableHeader pins ADR-0015's rule applied here:
 // classification is generous, exemption is strict. A file with a broken header
 // is still a copy, so it is not skipped — but every comparison this package
@@ -460,8 +645,10 @@ func TestVisit_RefusesAnUnusableHeader(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "a malformed digest",
-			mangle:  func(s string) string { return strings.Replace(s, "# modelith-digest: sha256:", "# modelith-digest: ", 1) },
+			name: "a malformed digest",
+			mangle: func(s string) string {
+				return strings.Replace(s, "# modelith-digest: sha256:", "# modelith-digest: ", 1)
+			},
 			wantErr: "sha256:<64 hex digits>",
 		},
 		{
@@ -470,8 +657,10 @@ func TestVisit_RefusesAnUnusableHeader(t *testing.T) {
 			wantErr: "unknown provenance key",
 		},
 		{
-			name:    "a missing origin",
-			mangle:  func(s string) string { return strings.Replace(s, "# modelith-origin: https://github.com/acme/billing\n", "", 1) },
+			name: "a missing origin",
+			mangle: func(s string) string {
+				return strings.Replace(s, "# modelith-origin: https://github.com/acme/billing\n", "", 1)
+			},
 			wantErr: `missing "# modelith-origin"`,
 		},
 	}
