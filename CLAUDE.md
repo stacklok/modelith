@@ -140,9 +140,6 @@ the published site to keep the root clean:
   multi-agent audit snapshots (rationale for the choices above) and the process
   for running new ones.
 
-The only known open follow-up is a release-branch guard for `release.yml`,
-tracked as [issue #1](https://github.com/stacklok/modelith/issues/1).
-
 ## Working conventions
 
 - **Every commit must be signed off (DCO).** Commit with `git commit -s` so a
