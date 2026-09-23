@@ -298,12 +298,14 @@ func guardTarget(target string, src Source) (replaced bool, err error) {
 			"%s already exists and carries no provenance header, so it is a model this repository owns rather than a copy of one — importing would overwrite it. Import into a different directory, or move that file aside first",
 			target)
 	}
-	// A header too malformed to name where it came from is still a vendored
-	// copy, and replacing it is how it gets repaired; only a header that names
-	// a *different* model blocks the write.
+	// A malformed header can still be repaired, but only if its surviving
+	// identity names this exact source. A reserved-prefix comment alone is not
+	// enough to establish that this repository does not own the file.
 	h, _ := provenance.Parse(existing)
 	if h.Origin == "" || h.Path == "" {
-		return true, nil
+		return false, fmt.Errorf(
+			"%s cannot be identified as a copy of the source (%s/%s) because its provenance header does not name both an origin and path. Import into a different directory, or deliberately move or delete the existing file first",
+			target, src.Origin, src.Path)
 	}
 	switch {
 	// GitHub treats an owner and a repository name case-insensitively, and

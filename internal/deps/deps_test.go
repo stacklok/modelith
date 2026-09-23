@@ -443,6 +443,39 @@ func TestImport_RefusesToOverwriteWhatItDidNotWrite(t *testing.T) {
 	}
 }
 
+func TestImport_RefusesUnknownReservedPrefixAtTarget(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "payments.modelith.yaml")
+	existing := "# modelith-note: locally owned\n" + strings.Replace(upstream, "title: Payments", "title: Ours", 1)
+	if err := os.WriteFile(target, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := importInto(t, dir, &fakeRunner{content: upstream, sha: sha}, blobURL)
+	if err == nil {
+		t.Fatal("an unknown reserved-prefix comment allowed import to overwrite a local model")
+	}
+	for _, want := range []string{
+		"cannot be identified as a copy of the source",
+		"Import into a different directory",
+		"deliberately move or delete",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not offer %q: %v", want, err)
+		}
+	}
+
+	got, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != existing {
+		t.Errorf("the refused import wrote over the file anyway:\n%s", got)
+	}
+}
+
 // TestSplitHint pins that the ref/path hint is offered for the failure it
 // explains and no other. It was appended to every fetch error, so "gh is not
 // installed" arrived with a paragraph about ref splitting attached — advice
