@@ -47,9 +47,11 @@ every check a write, which is exactly the property that makes `check` safe to
 run in CI and safe to run against a read-only checkout.
 
 **One write condition** follows from both, and no case needs a branch of its
-own. `deps update` writes when `Digest(local) != Digest(upstream)`, or when the
-ref changed. A hand-edited copy is therefore not current whatever upstream did,
-and updating it restores it.
+own. `deps update` writes when `Digest(local) != Digest(upstream)`, when
+`Digest(local) != Header.Digest`, or when the ref changed. The second condition
+covers a merge where the content matches upstream but the existing header still
+describes an older digest: `lint` rejects that copy, and `update` repairs its
+header.
 
 ## Consequences
 
@@ -72,5 +74,6 @@ and updating it restores it.
   question after an update with the user's own tooling, and reverting an update
   is one command. What is given up is seeing what moved *before* deciding to
   take it.
-- Pinned by `TestADR_0016_StalenessIsContentNotCommit` and
-  `TestADR_0016_ACurrentCopyIsNotRewritten`.
+- Pinned by `TestADR_0016_StalenessIsContentNotCommit`,
+  `TestADR_0016_ACurrentCopyIsNotRewritten`, and
+  `TestADR_0016_HeaderDigestMismatchRequiresUpdate`.

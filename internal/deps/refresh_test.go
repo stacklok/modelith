@@ -448,7 +448,7 @@ func TestUpdate_ReportsImportsItDidNotFollow(t *testing.T) {
 	}
 }
 
-// TestADR_0017_HeaderDigestMismatchRequiresUpdate pins the case a write
+// TestADR_0016_HeaderDigestMismatchRequiresUpdate pins the case a write
 // condition resting on Current alone gets wrong, and gets wrong permanently.
 //
 // A merge is the ordinary way in: the incoming side changes the model and the
@@ -458,7 +458,7 @@ func TestUpdate_ReportsImportsItDidNotFollow(t *testing.T) {
 // mismatch lint reports and sends the user here to repair. Skipping it left
 // update saying "up to date" about a file check called stale and lint called
 // tampered with, with nothing in any of the three messages naming a way out.
-func TestADR_0017_HeaderDigestMismatchRequiresUpdate(t *testing.T) {
+func TestADR_0016_HeaderDigestMismatchRequiresUpdate(t *testing.T) {
 	t.Parallel()
 
 	path, r := vendored(t, upstream)
