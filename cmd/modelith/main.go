@@ -489,24 +489,22 @@ func lintCmd() *cobra.Command {
 			}
 			completenessAsError := completeness == "error"
 
-			type fileResult struct {
-				File     string         `json:"file"`
-				Findings []lint.Finding `json:"findings"`
-			}
-			var all []fileResult
-			blocking := false
-
+			inputs := make([]lint.Input, 0, len(args))
 			for _, path := range args {
 				data, err := os.ReadFile(path)
 				if err != nil {
 					return fmt.Errorf("%s: %w", path, err)
 				}
-				res, err := lint.Run(path, data, lint.OSFiles{})
-				if err != nil {
-					return fmt.Errorf("%s: %w", path, err)
-				}
-				all = append(all, fileResult{File: path, Findings: res.Findings})
-				if res.HasBlocking(completenessAsError) {
+				inputs = append(inputs, lint.Input{Path: path, Source: data})
+			}
+			all, err := lint.Plan(inputs, lint.OSFiles{})
+			if err != nil {
+				return err
+			}
+
+			blocking := false
+			for _, fr := range all {
+				if (&lint.Result{Findings: fr.Findings}).HasBlocking(completenessAsError) {
 					blocking = true
 				}
 			}

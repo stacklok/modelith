@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stacklok/modelith/internal/deps"
+	"github.com/stacklok/modelith/internal/lint"
 	"github.com/stacklok/modelith/internal/provenance"
 )
 
@@ -122,6 +123,70 @@ func TestLintMissingFileErrors(t *testing.T) {
 	_, err := run(t, "lint", filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err == nil {
 		t.Fatal("expected an error for a missing file, got nil")
+	}
+}
+
+func TestLintReportsDiscoveredVendoredChildUnderChildPath(t *testing.T) {
+	dir := t.TempDir()
+	childPath := filepath.Join(dir, "child.modelith.yaml")
+	child := strings.Replace(minimalValid, "A thing that exists in the model.", "A changed thing.", 1)
+	writeTemp(t, dir, "child.modelith.yaml", vendorHeader(minimalValid)+child)
+	rootPath := writeTemp(t, dir, "root.modelith.yaml", `kind: DomainModel
+version: v1
+imports:
+  - ./child.modelith.yaml
+entities:
+  Root:
+    definition: The root model.
+`)
+
+	out, err := run(t, "lint", rootPath)
+	if !errors.Is(err, errBlocking) {
+		t.Fatalf("expected errBlocking, got %v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(out, childPath+":\n  error   [semantic] (root): this vendored file no longer matches the digest") {
+		t.Fatalf("discovered provenance finding was not grouped under %s:\n%s", childPath, out)
+	}
+}
+
+func TestLintDoesNotDuplicateExplicitDiscoveredChild(t *testing.T) {
+	dir := t.TempDir()
+	childPath := filepath.Join(dir, "child.modelith.yaml")
+	child := strings.Replace(minimalValid, "A thing that exists in the model.", "A changed thing.", 1)
+	writeTemp(t, dir, "child.modelith.yaml", vendorHeader(minimalValid)+child)
+	rootPath := writeTemp(t, dir, "root.modelith.yaml", `kind: DomainModel
+version: v1
+imports:
+  - ./child.modelith.yaml
+entities:
+  Root:
+    definition: The root model.
+`)
+
+	out, err := run(t, "lint", "--format", "json", rootPath, childPath)
+	if !errors.Is(err, errBlocking) {
+		t.Fatalf("expected errBlocking, got %v\noutput:\n%s", err, out)
+	}
+	var payload struct {
+		Files []struct {
+			File     string         `json:"file"`
+			Findings []lint.Finding `json:"findings"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput:\n%s", err, out)
+	}
+	var children []struct {
+		File     string         `json:"file"`
+		Findings []lint.Finding `json:"findings"`
+	}
+	for _, file := range payload.Files {
+		if file.File == childPath {
+			children = append(children, file)
+		}
+	}
+	if len(children) != 1 || len(children[0].Findings) != 1 {
+		t.Fatalf("child results = %+v, want one provenance finding", children)
 	}
 }
 
