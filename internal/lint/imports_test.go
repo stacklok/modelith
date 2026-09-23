@@ -136,6 +136,25 @@ func assertFindings(t *testing.T, got []Finding, want []wantFinding) {
 	}
 }
 
+func TestLoadImport_SuccessRetainsLoadedData(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{"docs/payments.modelith.yaml": paymentsModel}
+	loaded, failure := loadImport(importerPath, "docs", false, "./payments.modelith.yaml", files)
+	if failure != nil {
+		t.Fatalf("loadImport failed: %+v", failure)
+	}
+	if loaded.resolvedPath != "docs/payments.modelith.yaml" {
+		t.Errorf("resolved path = %q, want %q", loaded.resolvedPath, "docs/payments.modelith.yaml")
+	}
+	if string(loaded.source) != paymentsModel {
+		t.Errorf("source = %q, want %q", loaded.source, paymentsModel)
+	}
+	if loaded.model == nil || loaded.model.Kind != "DomainModel" || loaded.model.Version != "v1" {
+		t.Errorf("model = %+v, want parsed v1 domain model", loaded.model)
+	}
+}
+
 func TestImports_Resolution(t *testing.T) {
 	t.Parallel()
 

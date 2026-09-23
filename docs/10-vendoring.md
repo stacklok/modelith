@@ -155,6 +155,12 @@ This is drift detection, not a security boundary: anyone editing the file can
 recompute the header. It catches the well-meaning typo fix, which is the thing
 that actually happens.
 
+When lint starts from an importing model, it follows locally readable imports
+and verifies every vendored copy it reaches. A mismatch is reported against the
+copy that needs repair, not its importer. This stays offline and does not add
+new diagnostics for a nested import that cannot be read; lint does not become a
+recursive semantic validator.
+
 ## Keeping the copy current
 
 The section above is about your copy. This one is about the model it came from,
