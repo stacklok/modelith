@@ -146,6 +146,85 @@ func TestPlan_ExplicitRootDiscoveredThroughImportRunsFullLintOnce(t *testing.T) 
 	}
 }
 
+func TestPlan_ExplicitAliasesRunFullLintInArgumentOrder(t *testing.T) {
+	t.Parallel()
+
+	const first = "./models/root.modelith.yaml"
+	const second = "models/root.modelith.yaml"
+	results := planned(t, []Input{
+		{Path: first, Source: []byte(gappy)},
+		{Path: second, Source: []byte(gappy)},
+	}, fakeFiles{".git": ""})
+
+	if len(results) != 2 || results[0].File != first || results[1].File != second {
+		t.Fatalf("results = %+v, want both explicit aliases in argument order", results)
+	}
+	for _, result := range results {
+		var completeness bool
+		for _, finding := range result.Findings {
+			if finding.Category == CategoryCompleteness {
+				completeness = true
+			}
+		}
+		if !completeness {
+			t.Errorf("%s did not receive full lint: %+v", result.File, result.Findings)
+		}
+	}
+}
+
+func TestPlan_StructurallyInvalidExplicitRootDoesNotSeedTraversal(t *testing.T) {
+	t.Parallel()
+
+	const root = "models/root.modelith.yaml"
+	const child = "models/child.modelith.yaml"
+	rootSource := importer([]string{`{scope: child, path: "./child.modelith.yaml"}`}, "child.PaymentMethod") + "unexpected: true\n"
+	files := fakeFiles{
+		".git": "",
+		root:   rootSource,
+		child:  editedVendored(t),
+	}
+
+	results := planned(t, []Input{{Path: root, Source: []byte(rootSource)}}, files)
+	if len(results) != 1 || results[0].File != root {
+		t.Fatalf("results = %+v, want only the explicit root", results)
+	}
+	var structural bool
+	for _, finding := range results[0].Findings {
+		if finding.Category == CategoryStructural {
+			structural = true
+		}
+	}
+	if !structural {
+		t.Errorf("root did not retain its full structural result: %+v", results[0].Findings)
+	}
+}
+
+// TestADR_0017_VendoredIntermediaryReachesMismatchedVendoredGrandchild pins the
+// exception to ADR-0015's import suppression: locally readable imports of a
+// vendored copy participate in the integrity-only crawl, without receiving
+// transitive semantic lint.
+func TestADR_0017_VendoredIntermediaryReachesMismatchedVendoredGrandchild(t *testing.T) {
+	t.Parallel()
+
+	const root = "models/root.modelith.yaml"
+	const middle = "models/middle.modelith.yaml"
+	const child = "models/child.modelith.yaml"
+	files := fakeFiles{
+		".git": "",
+		root:   importer([]string{`{scope: middle, path: "./middle.modelith.yaml"}`}, "middle.PaymentMethod"),
+		middle: stamp(t, importer([]string{`{scope: child, path: "./child.modelith.yaml"}`}, "child.PaymentMethod")),
+		child:  editedVendored(t),
+	}
+
+	results := planned(t, []Input{{Path: root, Source: []byte(files[root])}}, files)
+	if len(results) != 2 || results[0].File != root || results[1].File != child || len(results[1].Findings) != 1 {
+		t.Fatalf("results = %+v, want root plus the mismatched vendored grandchild", results)
+	}
+	if !strings.Contains(results[1].Findings[0].Message, "deps update "+child) {
+		t.Errorf("grandchild = %+v, want remedy for %q", results[1], child)
+	}
+}
+
 func TestPlan_ReportsReadableUnsupportedVendoredChild(t *testing.T) {
 	t.Parallel()
 

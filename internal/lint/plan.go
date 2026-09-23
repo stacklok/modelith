@@ -22,32 +22,37 @@ type FileResult struct {
 	Findings []Finding `json:"findings"`
 }
 
-// Plan runs full lint for explicit inputs and provenance verification for their
-// locally reachable imported models.
+// Plan runs full lint for every explicit input and provenance verification for
+// their locally reachable imported models. Explicit inputs retain both their
+// argument order and multiplicity; resolved paths deduplicate only discovery.
 func Plan(inputs []Input, files Files) ([]FileResult, error) {
 	if files == nil {
 		files = OSFiles{}
 	}
 
 	results := make([]FileResult, 0, len(inputs))
-	visited := make(map[string]bool, len(inputs))
+	explicit := make(map[string]bool, len(inputs))
+	for _, input := range inputs {
+		explicit[files.Resolve(input.Path)] = true
+	}
+	discovered := make(map[string]bool)
 	queue := make([]loadedImport, 0, len(inputs))
 
 	for _, input := range inputs {
-		path := files.Resolve(input.Path)
-		if visited[path] {
-			continue
-		}
-		visited[path] = true
-
 		result, err := Run(input.Path, input.Source, files)
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, FileResult{File: input.Path, Findings: result.Findings})
 
+		// A structurally invalid root has already received its full result above,
+		// but its imports cannot safely seed the integrity-only crawl.
 		if imported := traversableModel(input.Source); imported != nil {
-			queue = append(queue, loadedImport{resolvedPath: path, source: input.Source, model: imported})
+			queue = append(queue, loadedImport{
+				resolvedPath: files.Resolve(input.Path),
+				source:       input.Source,
+				model:        imported,
+			})
 		}
 	}
 
@@ -60,10 +65,10 @@ func Plan(inputs []Input, files Files) ([]FileResult, error) {
 				continue
 			}
 			loaded, failure := loadImport(current.resolvedPath, root, inRepo, imp.Path, files)
-			if visited[loaded.resolvedPath] || (failure != nil && loaded.source == nil) {
+			if explicit[loaded.resolvedPath] || discovered[loaded.resolvedPath] || (failure != nil && loaded.source == nil) {
 				continue
 			}
-			visited[loaded.resolvedPath] = true
+			discovered[loaded.resolvedPath] = true
 
 			res := &Result{}
 			runProvenance(loaded.resolvedPath, loaded.source, res)
@@ -72,7 +77,12 @@ func Plan(inputs []Input, files Files) ([]FileResult, error) {
 				results = append(results, FileResult{File: loaded.resolvedPath, Findings: res.Findings})
 			}
 			if failure == nil {
-				queue = append(queue, loaded)
+				// A broken nested edge stays silent, but a readable, structurally
+				// valid model continues the integrity-only crawl.
+				if imported := traversableModel(loaded.source); imported != nil {
+					loaded.model = imported
+					queue = append(queue, loaded)
+				}
 			}
 		}
 	}
@@ -80,8 +90,11 @@ func Plan(inputs []Input, files Files) ([]FileResult, error) {
 	return results, nil
 }
 
-// traversableModel accepts parsed domain models that this build supports.
+// traversableModel accepts structurally valid domain models that this build supports.
 func traversableModel(source []byte) *model.Model {
+	if len(Structural(source)) > 0 {
+		return nil
+	}
 	m, err := model.Parse(source)
 	if err != nil || m.Kind != "DomainModel" || !schema.Supported(m.Version) {
 		return nil

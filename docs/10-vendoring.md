@@ -85,9 +85,11 @@ Two things change, and nothing else:
   its own authors control. Without this, the [GitHub
   Action](./08-github-action.md) — which lints every matched file — would fail
   your build over someone else's model.
-- **Its own `imports:` raise nothing.** A vendored model's imports name paths
-  in *its* repository, which do not exist in yours. Those are skipped, along
-  with the references that resolve through them.
+- **Its own `imports:` do not receive semantic diagnostics.** A vendored
+  model's imports commonly name paths in *its* repository, which do not exist in
+  yours. Missing or broken nested edges stay silent, along with references that
+  resolve through them; readable local edges still participate in provenance
+  verification.
 
 **Structural and semantic checks still run.** A vendored file that is not a
 valid domain model breaks your build, and that is your problem to solve — by
