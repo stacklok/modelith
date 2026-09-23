@@ -325,6 +325,14 @@ func printCheckReports(out, errOut io.Writer, reports []deps.Report) bool {
 			// files.
 		case r.Stale():
 			stale++
+			if r.CommitErr != nil {
+				// The verdict came from the digest comparison and stands on its
+				// own; only the commit to name alongside it is missing.
+				fmt.Fprintf(errOut, "%s: its origin's current commit could not be resolved: %v\n",
+					r.Path, r.CommitErr)
+				fmt.Fprintf(out, "%s: stale at %s — the origin has moved\n", r.Path, r.State.Ref)
+				break
+			}
 			fmt.Fprintf(out, "%s: stale at %s — the origin is now at %s\n",
 				r.Path, r.State.Ref, shortSHA(r.Commit))
 		default:

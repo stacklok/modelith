@@ -114,7 +114,17 @@ func ParseSource(raw, ref string) (Source, error) {
 	}
 	// A host is case-insensitive, and a browser hands back the "www." form as
 	// readily as the bare one; neither is a different site.
-	if host := strings.TrimPrefix(strings.ToLower(u.Host), "www."); host != "github.com" {
+	host := strings.TrimPrefix(strings.ToLower(u.Host), "www.")
+	// The Raw button hands back this host, so it is an easy thing to paste. The
+	// model is on GitHub and the address just names a different view of it, so
+	// sending the reader off to ask for another host to be supported would be
+	// advice about the wrong problem.
+	if host == "raw.githubusercontent.com" {
+		return Source{}, fmt.Errorf(
+			"%q is a raw file URL, and modelith wants the page you see when you open the file on github.com — the same address with /blob/ in it. Open the file there and copy the address bar",
+			raw)
+	}
+	if host != "github.com" {
 		return Source{}, fmt.Errorf(
 			"modelith can currently fetch only from github.com, and %q is on %q. Support for other hosts is not written yet because nobody has needed it — if you do, please open an issue at %s saying where your models live",
 			raw, u.Host, issuesURL)
@@ -299,7 +309,7 @@ func guardTarget(target string, src Source) (replaced bool, err error) {
 	// GitHub treats an owner and a repository name case-insensitively, and
 	// Origin keeps whatever casing the URL was typed with, so comparing these
 	// byte-for-byte would refuse a refresh over nothing but capitalisation.
-	case !strings.EqualFold(h.Origin, src.Origin):
+	case !strings.EqualFold(normOrigin(h.Origin), normOrigin(src.Origin)):
 		return false, fmt.Errorf(
 			"%s is a vendored copy of %s/%s, not of %s/%s — two different models share that filename. Import into a different directory so both can live here",
 			target, h.Origin, h.Path, src.Origin, src.Path)
@@ -376,6 +386,14 @@ func fetchCommit(ctx context.Context, runner Runner, src Source) (string, error)
 	}
 	return sha, nil
 }
+
+// normOrigin puts an origin in the form ParseSource writes, so that a header
+// someone typed by hand is read as naming the repository it names. A trailing
+// slash is the difference a browser's address bar most readily introduces, and
+// every place an origin is compared or rebuilt has to agree on it: disagreeing
+// makes the same header refresh cleanly under one command and be refused as a
+// different model's by another.
+func normOrigin(o string) string { return strings.TrimSuffix(o, "/") }
 
 // escapePath escapes each segment of a repository path, leaving the separators
 // alone so the API still sees a path.

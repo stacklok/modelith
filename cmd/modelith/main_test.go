@@ -622,6 +622,29 @@ func TestDepsCheckOutput(t *testing.T) {
 		}
 	})
 
+	// The commit is what the verdict is decorated with, not what it rests on.
+	// Reporting an unresolvable SHA as the file failing said "1 file could not
+	// be reached, 0 stale" about a file that was reached and is stale.
+	t.Run("a stale copy keeps its verdict when only the commit is missing", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		unresolved := stale
+		unresolved.Commit, unresolved.CommitErr = "", errors.New("gh: HTTP 500")
+		if !printCheckReports(&out, &errOut, []deps.Report{unresolved}) {
+			t.Error("a stale copy did not make the run exit non-zero")
+		}
+		for _, want := range []string{
+			"docs/ledger.modelith.yaml: stale at main — the origin has moved",
+			"checked 1 vendored copy, 1 stale",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("stdout does not contain %q:\n%s", want, out.String())
+			}
+		}
+		if !strings.Contains(errOut.String(), "current commit could not be resolved: gh: HTTP 500") {
+			t.Errorf("the reason the commit is missing is not on stderr:\n%s", errOut.String())
+		}
+	})
+
 	// A file that could not be reached is not evidence that it is current.
 	t.Run("a failure alone exits non-zero", func(t *testing.T) {
 		var out, errOut bytes.Buffer
