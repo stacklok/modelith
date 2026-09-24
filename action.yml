@@ -17,9 +17,9 @@ inputs:
     required: false
     default: "true"
   version:
-    description: "modelith release to install, e.g. 'v0.4.0'. Bumped manually after each release — see CLAUDE.md's release checklist in the modelith repo."
+    description: "modelith release to install, e.g. 'v0.5.0'. Bumped manually after each release — see CLAUDE.md's release checklist in the modelith repo."
     required: false
-    default: "v0.4.0"
+    default: "v0.5.0"
 
 runs:
   using: "composite"

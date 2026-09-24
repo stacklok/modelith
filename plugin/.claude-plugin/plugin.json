@@ -1,6 +1,6 @@
 {
   "name": "modelith",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Author, validate, and render domain models by conversation instead of hand-writing YAML. Three skills: draft/update the model, lint and explain findings, and load an existing model into a coding session so the agent reasons in your team's vocabulary. Requires the modelith CLI.",
   "author": {
     "name": "Stacklok"

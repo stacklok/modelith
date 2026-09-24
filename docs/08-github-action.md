@@ -19,9 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: stacklok/modelith@v0.4.0
+      - uses: stacklok/modelith@v0.5.0
         with:
           files: "model.modelith.yaml"
+          version: v0.5.0
           completeness: warn
           check-rendered: true
 ```
@@ -33,7 +34,7 @@ jobs:
 | `files` | — (required) | YAML files or globs, space-, comma-, or newline-separated. |
 | `completeness` | `warn` | Treat completeness gaps as `warn` or `error`. |
 | `check-rendered` | `true` | Verify the committed `*.md` matches the YAML. |
-| `version` | `v0.4.0` | Published `modelith` release to install. Set another published release to select it. |
+| `version` | action-ref-dependent | Published `modelith` release to install; defaults to the release configured by the referenced action version. Set another published release to select it. |
 
 Multiple files / globs:
 
@@ -48,8 +49,9 @@ with:
 
 The action downloads the prebuilt `modelith` release binary for the runner's OS
 and architecture, verifies it against the release's published checksums, and runs
-it. The `version` input defaults to `v0.4.0`; set it to another published release
-when you need a different version. Pinning your `uses:` reference to a commit SHA
+it. The example sets the `version` input explicitly to `v0.5.0`; set it to
+another published release when you need a different version. Pinning your
+`uses:` reference to a commit SHA keeps CI runs reproducible: a given action
 keeps CI runs reproducible: a given action commit installs the selected
 `modelith` version.
 
@@ -61,10 +63,8 @@ completeness findings for that copy and lets `check-rendered` skip a missing
 `.md` or a model this version cannot render. Structural and semantic findings,
 including a provenance-header defect or a changed copy, still fail the action.
 
-The default `v0.4.0` binary does not include vendored-model support. Select a
-published release that does before relying on this behavior. See [Vendoring a
-model from another repository](./10-vendoring.md) for provenance and render
-semantics.
+The default `v0.5.0` release supports this behavior. See [Vendoring a model from
+another repository](./10-vendoring.md) for provenance and render semantics.
 
 ## Regenerating the Markdown
 
