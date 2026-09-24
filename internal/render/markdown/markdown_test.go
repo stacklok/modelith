@@ -589,6 +589,30 @@ func TestCodeSpan_FencesAroundBackticks(t *testing.T) {
 	}
 }
 
+// TestRenderEntity_QualifiedEntityReferences links qualified relationship targets
+// and subtype parents to the imported entity heading.
+func TestRenderEntity_QualifiedEntityReferences(t *testing.T) {
+	t.Parallel()
+	m := &model.Model{
+		Imports: []model.Import{{Scope: "payments", Path: "../payments/payments.modelith.yaml"}},
+		Entities: map[string]model.Entity{
+			"Receipt": {Definition: "A receipt.", SubtypeOf: "payments.Invoice"},
+			"Visit": {Definition: "A visit.", Relationships: []model.Relationship{{
+				Entity: "payments.Invoice", Cardinality: "1:1", Ownership: "owned",
+			}}},
+		},
+	}
+	got := render(m)
+	for _, want := range []string{
+		"**Subtype of** [payments.Invoice](../payments/payments.modelith.md#invoice)\n",
+		"- [payments.Invoice](../payments/payments.modelith.md#invoice) — 1:1 — owned\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in:\n%s", want, got)
+		}
+	}
+}
+
 // TestRenderEntity_SubtypeHierarchy checks that a child names its supertype and
 // a parent lists its subtypes.
 func TestRenderEntity_SubtypeHierarchy(t *testing.T) {

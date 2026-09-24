@@ -95,7 +95,7 @@ Each key under `entities` is the entity's canonical name (PascalCase, e.g.
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `definition` | string | yes | Two to four sentences: what it is, what it is not. |
-| `subtypeOf` | string | no | Names the entity this one is a kind of (an is-a link). Must reference a defined entity. |
+| `subtypeOf` | string | no | Names the entity this one is a kind of (an is-a link). May name a defined local entity or an entity in a direct import as `scope.Entity`. |
 | `relationships` | list | no | See [Relationship](#relationship). |
 | `attributes` | list | no | See [Attribute](#attribute). |
 | `actions` | list | no | Mutations the system exposes. See [Action](#action). |
@@ -115,20 +115,23 @@ versions in play, so the ER stays a deliberately lossy view; the Markdown text
 is the source of truth.
 
 Use `subtypeOf` for generalization — when one entity *is a kind of* another
-(a `Card` is a `PaymentMethod`). The child declares it, and it must name a
-defined entity; the linter errors on an undefined parent or a cycle. A parent's
-invariants are understood to cover its subtypes, so a subtype that adds no rule
-of its own is not flagged for having no invariants. The Mermaid ER diagram does
-not draw the is-a link — erDiagram has no generalization notation, so the
-hierarchy lives in the rendered Markdown (each child names its supertype and
-each parent lists its subtypes), a deliberately lossy ER per the same principle
-as derived entities.
+(a `Card` is a `PaymentMethod`). The child declares it. The parent may be a
+local entity or a direct import qualified as `scope.Entity`; the latter must
+resolve to an entity in that import. The linter errors on an undefined local
+parent, missing imported parent, or a cycle among local entities. A local
+parent's invariants are understood to cover its subtypes, so a subtype that adds
+no rule of its own is not flagged for having no invariants. An imported parent
+is a boundary: modelith does not walk its ancestry or inherit its invariants.
+The Mermaid ER diagram does not draw the is-a link — erDiagram has no
+generalization notation, so the hierarchy lives in the rendered Markdown (each
+child names its supertype and each local parent lists its subtypes), a
+deliberately lossy ER per the same principle as derived entities.
 
 ## Relationship
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `entity` | string | yes | Target entity name. Must reference a defined entity. |
+| `entity` | string | yes | Target entity name. Must reference a defined local entity or an entity in a direct import as `scope.Entity`. |
 | `cardinality` | string | yes | Written `left:right` (see below). `1:1`, `1:n`, `n:1`, `n:n` are the common shorthands. |
 | `symmetric` | boolean | no | The relationship carries no inherent order: `(a, b)` is the same as `(b, a)`. Only valid on a self-referential relationship or one whose target side is more than one. |
 | `role` | string | no | The **short** role the related entity plays (`Owner`, `Predecessor`) — ideally a glossary term. Backtick entity and glossary names. It is the only label the diagram draws, so prose belongs in `note`; the linter warns on a role that reads as a sentence. |
@@ -149,6 +152,12 @@ cardinalities must be inverses (`1:n` one way ⇒ `n:1` the other; `1:1` and `n:
 invert to themselves). The linter errors on a contradiction, and the renderer collapses
 a matching pair into a single edge. Declaring it once is fine; the renderer
 shows the edge either way.
+
+A relationship may target an entity from a direct import as `scope.Entity`. The
+linter validates that imported entity exists, and the renderer shows it as a
+qualified external node. Validation stops at the import boundary: reciprocity,
+pairing, and mutual-ownership checks apply only to relationships declared in
+this model, even when the local declaration uses `ownership: owned`.
 
 When there's an intuitive **parent** — the entity that owns or contains the
 other, or sits on the "one" side of a one-to-many — prefer declaring the

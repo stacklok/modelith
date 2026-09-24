@@ -6,6 +6,7 @@ package mermaid
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -104,8 +105,9 @@ func (e *edge) merge(from, label string, owned bool) {
 // ER renders the model as a Mermaid erDiagram. Ordinary attributes are
 // intentionally omitted: their freeform conceptual types (e.g.
 // "enum[active, archived]") aren't valid erDiagram attribute types, so they are
-// shown in the Markdown table instead. The one thing inside an entity block is
-// its self-referential relationships (see selfRows).
+// shown in the Markdown table instead. Self-referential relationships and
+// qualified subtype parents are the only rows inside an entity block (see
+// selfRows and subtypeRow).
 func ER(m *model.Model) string {
 	var b strings.Builder
 	b.WriteString("erDiagram\n")
@@ -113,6 +115,9 @@ func ER(m *model.Model) string {
 	// Declare every entity so unconnected ones still appear.
 	for _, name := range m.EntityNames() {
 		rows := selfRows(name, m.Entities[name].Relationships)
+		if row := subtypeRow(m.Entities[name].SubtypeOf); row != "" {
+			rows = append(rows, row)
+		}
 		if len(rows) == 0 {
 			fmt.Fprintf(&b, "    %s {}\n", name)
 			continue
@@ -122,6 +127,10 @@ func ER(m *model.Model) string {
 			fmt.Fprintf(&b, "        %s\n", row)
 		}
 		b.WriteString("    }\n")
+	}
+
+	for _, target := range qualifiedTargets(m) {
+		fmt.Fprintf(&b, "    %s {}\n", target)
 	}
 
 	// A fold is a claim that two declarations are one relationship seen from two
@@ -186,6 +195,37 @@ func ER(m *model.Model) string {
 	}
 	return b.String()
 }
+
+// qualifiedTargets returns the unique imported entities named by relationships.
+// Mermaid accepts the qualified name as an entity name, so its node label remains
+// the exact reference the author wrote.
+func qualifiedTargets(m *model.Model) []string {
+	targets := map[string]bool{}
+	for _, name := range m.EntityNames() {
+		for _, rel := range m.Entities[name].Relationships {
+			if qualifiedEntityRE.MatchString(rel.Entity) {
+				targets[rel.Entity] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(targets))
+	for target := range targets {
+		out = append(out, target)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// subtypeRow preserves a qualified parent in the local entity's detail rows;
+// Mermaid ER has no generalization edge syntax.
+func subtypeRow(parent string) string {
+	if !qualifiedEntityRE.MatchString(parent) {
+		return ""
+	}
+	return fmt.Sprintf("string subtypeOf %q", parent)
+}
+
+var qualifiedEntityRE = regexp.MustCompile(`^` + model.ScopeSlug + `\.[A-Z][A-Za-z0-9]*$`)
 
 // selfRows renders an entity's self-referential relationships as rows inside
 // its own block. Mermaid's dagre ER layout has no self-loop handling, so an
