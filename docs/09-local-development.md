@@ -15,9 +15,8 @@ bottom of this page.
 
 ## Prerequisites
 
-- **Go** (a recent stable release) — the binary and tooling are pure Go.
+- **Go 1.26** — the binary and tooling are pure Go.
 - **[Task](https://taskfile.dev)** — the task runner (`brew install go-task`).
-- **`jq`** — used by the CI plugin check (`brew install jq`).
 - **The `claude` CLI** — only needed to validate/develop the plugin locally.
 - **Node.js / `npx`** — only needed for `task mermaid-check` (runs
   `@mermaid-js/mermaid-cli` via `npx`); not required for `task check`.
@@ -41,7 +40,7 @@ The repo uses [Task](https://taskfile.dev). The one that matters before pushing:
 task check
 ```
 
-It runs the CI checks plus a local-only plugin validation. Run `task` with no
+It runs the CI checks plus stricter local plugin validation. Run `task` with no
 arguments to list every target.
 
 | Command | What it does |
@@ -57,15 +56,15 @@ arguments to list every target.
 | `task render-check` | Verify the committed Markdown is up to date. |
 | `task validate-plugin` | Validate the plugin with `claude plugin validate --strict` (needs the `claude` CLI). |
 | `task mermaid-check` | Parse every emitted/committed Mermaid diagram with the real `mermaid-cli` (needs `npx`/node). Not part of `task check` — see below. |
-| `task check` | CI parity (vet, staticcheck, test, lint-models, render-check) plus `validate-plugin`. Does **not** run `mermaid-check`, so contributors without node/npm still get a green `task check`; CI runs the real Mermaid parse check as its own step instead. |
+| `task check` | CI parity (vet, staticcheck, golangci-lint, test, lint-models, render-check) plus `validate-plugin`. It does **not** run `mermaid-check`, so contributors without node/npm still get a green `task check`; CI runs the Mermaid parse check separately. |
 
 <details>
 <summary>CI runs a lighter plugin check</summary>
 
-`task check` runs the full `claude plugin validate ./plugin --strict` locally,
-where you already have the `claude` CLI. CI instead does an equivalent `jq`-based
-structural check (valid JSON, required fields, skill frontmatter present) so the
-Go pipeline doesn't depend on the Claude Code CLI. Both gate the same thing.
+`task check` runs `claude plugin validate ./plugin --strict` locally, which
+performs the full plugin validation. CI uses a lighter `jq`-based structural
+check for valid JSON, required manifest fields, and skill front matter, so the
+Go pipeline does not depend on the Claude Code CLI.
 
 </details>
 

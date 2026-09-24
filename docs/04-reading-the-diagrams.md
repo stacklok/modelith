@@ -11,9 +11,10 @@ diagram** in *crow's-foot* notation. It's a compact map of the nouns in the
 domain and how they connect. If you haven't read one before, this page is the
 key.
 
-The diagrams render automatically on GitHub and in the docs site (every fenced
-` ```mermaid ` block below is a live diagram). You never write this notation by
-hand — `modelith render` generates it from the `*.modelith.yaml`.
+GitHub renders the Mermaid blocks in committed Markdown, and this documentation
+site renders the live examples below. Other Markdown viewers may show the source
+instead. You never write this notation by hand: `modelith render` generates it
+from `*.modelith.yaml`.
 
 ## What the diagram shows (and what it doesn't)
 
@@ -241,5 +242,7 @@ Reading it:
 - **the `Project self` row** — a `Project` optionally points at the archived
   `Project` it replaced, its `Predecessor`.
 
-To go deeper on the underlying fields, see the [Schema
-Reference](./06-schema-reference.md).
+## Related information
+
+- [Understand the model contents](./03-understanding-your-model.md).
+- [Review the diagram fields in the schema](./06-schema-reference.md#relationship).

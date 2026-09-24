@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 title: Getting Started
-description: Install the CLI and the Claude Code plugin, then build your first domain model by talking to an agent.
+description: Install the CLI and authoring skills, then build your first domain model by talking to an agent.
 ---
 
 # Getting Started
@@ -14,10 +14,8 @@ not the starting point. This page gets you set up and into that loop.
 ## Install
 
 You need two things, in this order: the **CLI** (the engine that lints and
-renders the YAML) and the **Claude Code plugin** (the skills that drive it by
-conversation). The skills shell out to the `modelith` binary, so install it
-first — otherwise your first skill invocation fails on a missing binary
-instead of doing anything useful.
+renders the YAML) and the **authoring skills** that drive it by conversation.
+The skills shell out to the `modelith` binary, so install it first.
 
 ### 1. Install the CLI
 
@@ -29,68 +27,32 @@ Or download a prebuilt binary, or build from source with `go install` — see
 the full [CLI installation](./07-cli.md#installation) instructions for every
 option.
 
-### 2. Install the plugin
+### 2. Install the authoring skills
 
-The skills ship as a **Claude Code plugin**. The plugin files live in
-[`plugin/`](https://github.com/stacklok/modelith/tree/main/plugin), next to
-the binary they drive, so the skills and CLI version stay in lockstep.
-
-:::caution[Marketplace listing pending review]
-
-The plugin has been submitted to `anthropics/claude-plugins-community` and is
-awaiting Anthropic's approval. **The `claude plugin marketplace` commands below
-will fail until it's listed.**
-
-In the meantime, use the skills CLI below, which doesn't depend on the
-marketplace listing, or install from a local checkout:
-[Developing the plugin locally](./09-local-development.md#developing-the-plugin-locally).
-
-:::
-
-### Skills CLI install (works today)
-
-Install with the [skills CLI](https://skills.sh) (also works with Cursor,
-Windsurf, and other agents) — this doesn't depend on the marketplace listing:
+The authoring skills ship in the repository's
+[`plugin/`](https://github.com/stacklok/modelith/tree/main/plugin) directory.
+Install them with the [skills CLI](https://skills.sh):
 
 ```sh
 npx skills add stacklok/modelith
 ```
 
-### Marketplace install (once approved)
+The skills require the `modelith` binary on your `PATH`.
 
-Add the community marketplace once, then install:
+### Claude Code plugin
 
-```sh
-claude plugin marketplace add anthropics/claude-plugins-community
-claude plugin install modelith@claude-community
-```
-
-Restart Claude Code (plugin changes apply on the next session). The skills are
-namespaced under the plugin name — invoke them as `/modelith:domain-model-author`,
-`/modelith:domain-model-lint`, and `/modelith:domain-model-context`. You can also
-browse and install interactively with the `/plugin` command.
-
-<details>
-<summary>If the install looks like it did nothing</summary>
-
-A plugin install can occasionally wedge into a half-state — the UI shows the
-plugin but flags it "not cached (not recorded)", and you can't enable or
-uninstall it. Recover by clearing it and reinstalling:
+The plugin has not been approved for the public Claude Code catalog. Until it is,
+clone this repository and launch Claude Code with the plugin directory:
 
 ```sh
-claude plugin uninstall modelith@claude-community   # may fail; continue anyway
-claude plugin marketplace update claude-community
-claude plugin install modelith@claude-community
+git clone https://github.com/stacklok/modelith.git
+claude --plugin-dir /path/to/modelith/plugin
 ```
 
-If `uninstall` errors with "not installed in user scope," remove
-`"modelith@claude-community"` from `enabledPlugins` in `~/.claude/settings.json`
-and delete `~/.claude/plugins/cache/claude-community/modelith`, then reinstall.
-
-</details>
-
-To develop or test the plugin from a local checkout instead of the marketplace,
-see [Developing the plugin locally](./09-local-development.md#developing-the-plugin-locally).
+Replace `/path/to/modelith` with the cloned checkout. The skills are namespaced
+under the plugin name, for example `/modelith:domain-model-author`. See
+[Developing the plugin locally](./09-local-development.md#developing-the-plugin-locally)
+for using this workflow from a model repository.
 
 ## The skills
 
@@ -151,32 +113,34 @@ the value is in the questions it asks, not the typing:
 > **You:** One project only, and deleting the project deletes its policies. A
 > policy is meaningless without its project.
 >
-> **Agent:** That's an owned, one-to-many relationship — a `Project` has many
-> `Policies`, each part of exactly one. I'll declare it from the **parent** (the
-> owning `Project` side, by convention) and add the `Policy` entity with its
-> invariant:
+> **Agent:** I'll add this to the model and run `modelith lint`. This excerpt
+> needs a scenario that exercises `Policy` before the model passes
+> `--completeness error`.
 >
-> ```yaml
-> Project:
->   relationships:
->     - entity: Policy
->       cardinality: "1:n"
->       ownership: owned
->
-> Policy:
->   definition: >
->     A rule set evaluated by the system, belonging to exactly one `Project`. A
->     `Policy` has no meaning outside its owning `Project`.
->   invariants:
->     - id: belongs-to-one-project
->       statement: "Belongs to exactly one `Project`"
-> ```
->
-> Running `modelith lint`… clean. Regenerating `model.modelith.md`. One gap: no scenario
-> exercises `Policy` yet — want to add one (e.g. "attach a policy to a project")?
+The YAML below is an excerpt from the model's `entities` section:
 
-The agent drafted YAML, validated it, regenerated the Markdown, and surfaced a
-completeness gap as a question — the loop you'll repeat as the model grows.
+```yaml
+Project:
+  relationships:
+    - entity: Policy
+      cardinality: "1:n"
+      ownership: owned
+
+Policy:
+  definition: >
+    A rule set evaluated by the system, belonging to exactly one `Project`. A
+    `Policy` has no meaning outside its owning `Project`.
+  invariants:
+    - id: belongs-to-one-project
+      statement: "Belongs to exactly one `Project`"
+```
+
+> **Agent:** `modelith lint` reports the expected gap: no scenario exercises
+> `Policy` yet. Want to add one, such as "attach a policy to a project"?
+
+The agent drafted the YAML, validated the model, regenerated the Markdown, and
+surfaced the remaining completeness gap as a question. That is the loop you'll
+repeat as the model grows.
 
 For a full session start to finish — building a parking-garage model from
 nothing across all three passes, including a moment where the agent catches a
@@ -190,3 +154,10 @@ space: the agent knows what entities exist, what they're called, how they
 relate, and what invariants must hold. That produces more consistent code,
 better names, and fewer wrong guesses. The more complete and accurate the model,
 the less you have to correct.
+
+## Next steps
+
+- [Build the parking-garage model](./05-parking-garage/index.md) in a complete
+  authoring session.
+- [Understand the model files](./03-understanding-your-model.md) that the agent
+  produces.

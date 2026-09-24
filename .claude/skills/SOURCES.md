@@ -8,6 +8,18 @@ origin of borrowed text is auditable.
 recording the upstream source, the commit it was taken at, its licence, and
 what was changed. Skills written from scratch for modelith don't need an entry.
 
+## tech-writer
+
+- **Upstream:** [`stacklok/mecatl`](https://github.com/stacklok/mecatl),
+  `.claude/skills/tech-writer/`; copied through local checkout
+  `../mecatl-clean`.
+- **Taken at:** skill commit `33a3747d9008691d4d51a872c9e82c050c43fafa`
+  (2026-09-23), from checkout `d96de1fb6f40a713754dd3c65da8bcecf45a920b`.
+- **Licence:** Apache License 2.0; see the upstream checkout's `LICENSE`.
+- **Changes:** adapted the model-specific references to point at
+  `docs/_docs-conventions.md`, `CLAUDE.md`, and `.claude/rules/`; retained the
+  upstream body and `references/` directory otherwise.
+
 ## grilling
 
 - **Upstream:** [`mattpocock/skills`](https://github.com/mattpocock/skills),

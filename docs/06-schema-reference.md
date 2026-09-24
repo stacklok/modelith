@@ -259,6 +259,7 @@ entity-level ones render with their entity.
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `name` | string | yes | Short title. |
+| `description` | string | no | Short prose summary of what the scenario tests or demonstrates. |
 | `actors` | list of string | no | Entity names or glossary roles involved. Ad-hoc participants (e.g. `TargetUser`) are allowed and not required to be glossary terms. |
 | `steps` | list of string | yes | Ordered steps. Backtick entity names. |
 | `invariants_touched` | list of string | no | **Ids** of invariants this scenario exercises. Each must reference a declared invariant. |
@@ -336,11 +337,10 @@ Six rules are worth knowing before you use this:
   `shipping`, `shipping.Carrier` is not available in `garage` — import it
   there too. Mutual imports (`a` lists `b`, `b` lists `a`) are therefore legal
   and terminate.
-- **Only an attribute `type` may be qualified.** Cross-model references in
-  `relationship.entity` and `subtypeOf` are not supported; the linter says so
-  plainly rather than letting the name-pattern rejection speak for it. Whether
-  the ER diagram should draw a foreign entity — and how reciprocity would work
-  across a boundary — has no answer yet, and no live model needs one.
+- **Qualified references name imported items.** An attribute `type` can name an
+  imported enum as `scope.Enum`. `relationship.entity` and `subtypeOf` can name
+  an imported entity as `scope.Entity`. Each resolves only through a direct
+  import; an imported model's own imports are not in scope.
 - **Nothing is fetched.** `imports` names files that are already in your
   repository; `lint` and `render` never touch the network
   ([ADR-0011](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0011-network-boundary.md)).
@@ -356,19 +356,19 @@ Six rules are worth knowing before you use this:
   is out of reach.
 
 Rendered Markdown names each import, shows the path as written, and links
-separately to that model's rendered `.md`; a qualified type links straight to
-the item's heading there. The renderer never opens an imported file, so a link
-points at where the Markdown *would* be: render the imported model too, or the
-link dangles. That location is the imported model's **default** rendered path
-— beside its own `.yaml`, per [`modelith render`](./07-cli.md) with no `-o` —
-expressed relative to wherever this Markdown is written, so `-o` a different
-directory than the source keeps the link resolving. `--stdout` has no output
-location to relativize against, so its links stay relative to the source, as
-they would from a default, beside-the-source render.
+qualified references straight to the item's heading there. The renderer never
+opens an imported file, so a link points at where the Markdown *would* be:
+render the imported model too, or the link dangles. That location is the imported
+model's **default** rendered path — beside its own `.yaml`, per [`modelith
+render`](./07-cli.md) with no `-o` — expressed relative to wherever this
+Markdown is written, so `-o` a different directory than the source keeps the
+link resolving. `--stdout` has no output location to relativize against, so its
+links stay relative to the source, as they would from a default,
+beside-the-source render.
 
-The linter reports a qualified type that doesn't resolve as an **error**, while
-an *unqualified* PascalCase type that names no enum is only a **warning**. The
-asymmetry is deliberate: `PaymentMethod` might be a primitive the author
+The linter reports an unresolved qualified reference as an **error**, while an
+*unqualified* PascalCase attribute type that names no enum is only a **warning**.
+The asymmetry is deliberate: `PaymentMethod` might be a primitive the author
 invented, so the linter can only suggest; `payments.PaymentMethod` can be
 nothing but a cross-model reference, so failing to resolve it is a broken
 reference.
@@ -466,8 +466,10 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
       filename yields no valid slug, resolves outside the repository holding
       this model, contains a control character, or declares a schema version
       this modelith doesn't support;
-    - a qualified attribute `type` whose scope isn't imported, or that names
-      no enum in the model it resolves to.
+    - a qualified attribute `type` whose scope is not imported or that names no
+      enum in the model it resolves to; or a qualified relationship target or
+      subtype parent whose scope is not imported or that names no entity in the
+      model it resolves to.
   - **Warnings** (likely-but-not-certainly wrong):
     - a backticked term in freeform text that resolves to no entity, glossary
       term, role, or actor;

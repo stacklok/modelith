@@ -6,10 +6,10 @@ description: Lint and render domain models from the command line.
 
 # The `modelith` CLI
 
-`modelith` lints domain-model YAML and renders it to Markdown. It's the **engine
-the [authoring agent](./02-getting-started.md) and CI run for you** — you'll
-rarely invoke it directly. This page is the reference for when you do: every
-command, flag, and the one-time install.
+`modelith` validates domain-model YAML and renders it to Markdown. Use it directly
+when you want to lint a model, regenerate its committed Markdown, or inspect the
+schema. The [authoring agent](./02-getting-started.md) and CI use the same
+commands.
 
 ## Installation
 
@@ -65,6 +65,8 @@ Renders the model to a single Markdown document with an embedded Mermaid
 | `--stdout` | `false` | Write to stdout instead of a file. |
 | `--check` | `false` | Verify the committed output is up to date; non-zero exit on drift. |
 
+`--stdout` cannot be combined with `--out` or `--check`.
+
 If the model has [`imports`](./06-schema-reference.md#imports), the rendered
 links to them are relative to wherever `-o` writes — `-o` a different
 directory than the source and they still resolve, as long as the imported
@@ -90,84 +92,55 @@ modelith schema > modelith.schema.json
 
 ## `modelith deps`
 
-Manages models **vendored** from other repositories — copies committed here and
-marked with a provenance header. This is the only command group that uses the
-network; `lint` and `render` never do.
+Manages vendored copies from other repositories. It is the only command group
+that uses the network; `lint` and `render` run offline. See [Vendoring a model
+from another repository](./10-vendoring.md) for provenance headers, ownership
+semantics, and refresh behavior.
 
 ### `modelith deps import <url> [dir]`
 
-Fetches a model and writes it into `dir` (the working directory by default) as
-a vendored copy.
+Fetches a GitHub model and writes a vendored copy to `dir`, or the working
+directory when omitted. The filename comes from the origin. It requires an
+installed, authenticated [`gh`](https://cli.github.com) CLI and prints the
+`imports:` entry to add; it does not edit your model.
+
+| Argument / flag | Meaning |
+|---|---|
+| `<url>` | The address of the file as it appears in a browser on github.com. |
+| `[dir]` | Destination directory. |
+| `--ref` | Ref to fetch, overriding the ref in the URL. A tag pins the copy. |
+
+When a branch or tag contains `/`, pass `--ref` only when it names that same ref in
+the URL: it tells modelith where the ref ends and the file path begins. For
+example, use `--ref release/v2` with a URL containing
+`/blob/release/v2/docs/payments.modelith.yaml`. For an ordinary single-segment
+ref in the URL, a different `--ref` works. But `--ref` cannot both select a
+different ref and disambiguate a URL whose ref itself contains `/`; in that
+ambiguous case, copy the browser URL for the file at the target ref.
 
 ```sh
 modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml docs/
 ```
 
-| Argument / flag | Meaning |
-|---|---|
-| `<url>` | The address of the file as it appears in a browser on github.com. |
-| `[dir]` | Destination **directory**, defaulting to `.`. The filename always comes from the origin. |
-| `--ref` | Ref to fetch, overriding the one in the URL. A tag pins the copy; naming a branch whose name contains a slash is also how you tell modelith where the ref ends and the path begins. |
-
-A browse URL gives no way to tell a slashed ref from the path after it, so
-modelith splits at the first segment. `--ref` fixes that split only when it
-names the ref that is *in* the URL — it cannot both pin a different ref and
-re-split the path. To pin, open the file on the ref you want and import that
-URL. When a fetch fails, the error says how the URL was split.
-
-Fetching is delegated to [`gh`](https://cli.github.com), which must be installed
-and authenticated. The command writes the file and prints the `imports:` entry
-to add — it does not edit your model. It refuses to overwrite a file at the
-destination that is not an earlier copy of the same model.
-
 ### `modelith deps check <file>...`
 
-Reports which vendored copies have fallen behind their origins. Writes nothing,
-and exits non-zero when any copy is stale — or when one could not be reached,
-since not being able to tell is not evidence that it is current.
+Checks vendored copies against their origins and exits non-zero when a copy is
+stale or cannot be reached. It writes nothing and skips files without provenance
+headers.
 
 ```sh
 modelith deps check docs/*.modelith.yaml
 ```
 
-A copy is stale when its origin serves different content, compared against the
-digest in the copy's own header. A commit that touched the path without
-changing the file is not a change. Whether a copy *here* has been hand-edited
-is a different question, and `lint` answers it offline.
-
-Every line names the ref it checked against, because a copy pinned to a tag is
-up to date for as long as that tag points where it did — modelith does not look
-for newer releases.
-
 ### `modelith deps update [--ref <ref>] <file>...`
 
-Brings vendored copies forward to what their origins serve.
+Updates vendored copies from their origins. `--ref` re-pins one copy to a tag or
+branch; it accepts exactly one file. The command does not edit `imports:` or
+lint the result.
 
 ```sh
 modelith deps update docs/*.modelith.yaml
 modelith deps update --ref v2.2.0 docs/payments.modelith.yaml
 ```
 
-| Argument / flag | Meaning |
-|---|---|
-| `<file>...` | Vendored copies to update. Files with no provenance header are skipped. |
-| `--ref` | Re-pin the copy to this ref. Applies to **one file**: a single ref names a different version in every other repository. |
-
-A copy whose origin has not moved is left byte for byte alone, so running this
-over a glob produces a diff only where something changed. A copy that was
-hand-edited is not holding what its origin serves, so it is rewritten and the
-edits go.
-
-It writes the copies and nothing else — it does not edit any model's `imports:`
-and it does not lint. Run `modelith lint` afterwards: an item a copy used to
-define may have been renamed or removed upstream, which breaks references
-`update` cannot see.
-
-Both commands take file arguments the way `lint` does and skip files with no
-provenance header, so the glob you already lint works unchanged. Find your
-copies with `git grep -l '# modelith-vendored'`.
-
-See [Vendoring a model from another
-repository](./10-vendoring.md) for what the header records, how a vendored file
-is linted differently, how the two tracking modes differ, and why vendoring
-fetches one file rather than a tree.
+Use `modelith lint` after an update to find references that changed upstream.
