@@ -64,11 +64,13 @@ important decision in the model.
 ## Pass 1 — the skeleton
 
 The agent names every entity, writes a crisp definition for each, and declares
-the relationships and cardinality. **Nothing else** — no attributes, rules, or
+the relationships and cardinality. **Nothing else** - no attributes, rules, or
 scenarios yet. This is the highest-leverage step, and it already renders a real
-ER diagram.
+ER diagram. It is structurally and semantically valid, but it still has the
+expected completeness advisories until later passes add rules and scenarios.
 
-> **Agent:** Skeleton's in — 8 entities, lints with 0 errors. Here's the diagram:
+> **Agent:** Skeleton's in - 8 entities, 0 errors, and expected completeness
+> advisories for the rules and scenarios that Pass 2 will add. Here's the diagram:
 
 ```mermaid
 erDiagram
@@ -92,8 +94,9 @@ erDiagram
     Visit ||--|| Ticket : ""
 ```
 
-> **Agent:** This is the minimum useful model — honest to stop here and
-> circulate. Three things to sanity-check before I add behavior:
+> **Agent:** This is the minimum useful model. You can circulate it now, then
+> address the completeness advisories as you add behavior. Three things to
+> sanity-check before I add behavior:
 >
 > 1. **`Spot → Account` is 1:1** — one reserved spot per parker. If a parker can
 >    hold several, that's `n:1`.
@@ -232,12 +235,12 @@ the source.
 
 Want to try it yourself? See [Authoring with Agents](../02-getting-started.md).
 
-## Advanced: borrowing a concept from another model
+## Beyond the three core passes: import a shared concept
 
 :::note[Advanced]
 
-Skip this until you have two models. One model is the normal case, and
-everything above works without it.
+This is an extension beyond the three core passes, not a fourth required pass.
+Use it when a second model already owns a concept.
 
 :::
 
@@ -266,9 +269,9 @@ enums:
       - name: account
 ```
 
-The garage lists the file and writes `scope.Name` at the reference site. The
-scope comes from the filename, so `./payments.modelith.yaml` is written
-`payments.`:
+The garage lists the file and uses `scope.Name` at the reference site. The
+importing model derives the scope `payments` from
+`./payments.modelith.yaml`; `payments.PaymentMethod` uses that scope:
 
 ```yaml
 # garage.modelith.yaml
@@ -286,12 +289,17 @@ an error, not a shrug — and the [rendered model](./garage.modelith.md) links
 [payments model](./payments.modelith.md). One definition, in the context that
 owns it.
 
-The one thing the payments model *may* want to say is that it is on the
-receiving end of this. A model whose enums are used only by the models that
-import it collects an "enum is defined but no attribute uses it" advisory for
-each one, since the uses are in files it cannot see. `shared: true` at the top
-level retires that class of advisory — and nothing else. This one declares it,
-though its own `Payment` happens to use the enum too.
+The fixture declares `shared: true` because the payments model is intended for
+other models to import. Its own `Payment` also uses `PaymentMethod`, so this
+fixture has no unused-enum advisory to suppress. In a vocabulary-only model,
+`shared: true` suppresses the unused enum and glossary-term advisories caused by
+uses that live in importing files; it changes nothing else.
 
 Full rules, including how to name a scope explicitly when the filename won't do:
 [Imports](../06-schema-reference.md#imports).
+
+## Next steps
+
+- [Create a model with the authoring workflow](../02-getting-started.md).
+- [Use imports and `shared`](../06-schema-reference.md#imports) when models need
+  the same enum or entity.

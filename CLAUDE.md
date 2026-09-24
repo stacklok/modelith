@@ -114,6 +114,11 @@ publishes the GitHub Release, and pushes the Homebrew formula to
   source (see [`docs/08-github-action.md`](./docs/08-github-action.md)) — skip
   this step and the action keeps installing an old release indefinitely, with
   no error to flag it.
+- **Update `docs/08-github-action.md` for the new tag.** Change its example
+  action reference and documented `version` default to the release tag, then
+  revise any feature-availability notes that depended on the former default.
+  The Action page is a copy-paste entry point; leaving it on an old tag makes
+  its instructions disagree with `action.yml`.
 - **Bump `plugin/.claude-plugin/plugin.json`'s `version` to match, if the
   plugin/skills changed.** The plugin ships next to the binary it drives so
   the two stay in lockstep (see "Repository layout" above) — this doesn't

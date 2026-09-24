@@ -1,13 +1,13 @@
 // Package schema holds the canonical JSON Schemas for a Stacklok domain model,
 // one per format version, and helpers to compile them. The schema files
-// themselves (vN/modelith.schema.json) are the source of truth; each is also
-// published by URL (see URLFor) so editors can use it via a
+// themselves (vN/modelith.schema.json) are the source of truth. Each has a
+// canonical URL (see URLFor) for use in a
 // "# yaml-language-server: $schema=" header.
 //
 // This package is internal on purpose: modelith's contract is the CLI and the
-// published JSON Schema, not a Go API. The schema living under internal/ has no
-// effect on the file being reachable by URL — internal/ is a Go-compiler
-// visibility rule only — it is published to modelith.sh by the release pipeline.
+// JSON Schema, not a Go API. The schema living under internal/ is only a
+// Go-compiler visibility rule. The CLI embeds the schema bytes, so it validates
+// models without fetching their canonical URLs.
 package schema
 
 import (

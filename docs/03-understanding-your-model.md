@@ -1,13 +1,14 @@
 ---
 sidebar_position: 3
 title: Understanding Your Model
-description: What the agent produces — the YAML's four sections, the backtick convention, and the two files you commit.
+description: "What the agent produces: the YAML's core concepts, backtick convention, and two files you commit."
 ---
 
 # Understanding Your Model
 
 You author by conversation, but you still own the result — and you should be
-able to read it without the agent. Every model produces **two committed files**:
+able to read it without the agent. For a model your repository owns, commit two
+files:
 
 - **`model.modelith.yaml`** — the canonical source. Self-describing (`kind` +
   `version`), it's what the agent edits and what CI validates.
@@ -16,11 +17,13 @@ able to read it without the agent. Every model produces **two committed files**:
   directly, and CI fails if it drifts from the YAML.
 
 Commit both. The Markdown is generated from the YAML — never hand-edit it; change
-the YAML (via the agent) and re-render.
+the YAML (via the agent) and re-render. A model [vendored from another
+repository](./10-vendoring.md) is a copy with different rendering obligations.
 
-## The four sections
+## Model contents
 
-A `*.modelith.yaml` file has four top-level sections:
+A model can define `glossary`, `enums`, `entities`, `scenarios`, and model-level
+`invariants`:
 
 - **`glossary`** — ubiquitous-language terms that aren't entities (roles like
   `Owner`, states, domain nouns), each with a definition.
@@ -32,12 +35,17 @@ A `*.modelith.yaml` file has four top-level sections:
   whether the model hangs together. Scenarios render as formatted text steps
   today; `sequenceDiagram` rendering is a roadmap item.
 
-A fifth, optional top-level section — **`invariants`** — holds rules that span
-several entities and have no natural single owner (e.g. "when a `Project` is
-archived, none of its `Policies` remain enabled"). It uses the same
-`{id, statement}` shape as entity invariants and shares their id namespace; reach
-for it only when a rule genuinely has no single home (see the
-[Schema Reference](./06-schema-reference.md#invariant)).
+Model-level `invariants` hold rules that span several entities and have no
+natural single owner (for example, "when a `Project` is archived, none of its
+`Policies` remain enabled"). They use the same `{id, statement}` shape as entity
+invariants and share their ID namespace.
+
+A model can also declare `imports` to reference enums and entities defined by
+another model. Imports use files already in your repository. If the other model
+originates elsewhere, [vendoring](./10-vendoring.md) copies it into your
+repository; it remains a vendored model with different rendering obligations.
+See the [Schema Reference](./06-schema-reference.md) for these and all other
+top-level fields.
 
 A minimal model looks like this:
 
@@ -83,7 +91,8 @@ the Diagrams](./04-reading-the-diagrams.md) for how the rendered ER diagram work
 
 In freeform text (definitions, steps, invariants), entity names are wrapped in
 backticks — `` `Project` `` — so the renderer formats them as code and the
-linter can check they reference real entities. In structured fields that already
-imply an entity (`actors`, relationship `entity:`, entity keys), the backticks
-are skipped. The agent follows this automatically; it's worth recognizing when
-you read the YAML.
+linter can check they reference real entities. Freeform text renders as
+Markdown; raw HTML is rendered as literal text. In structured fields that
+already imply an entity (`actors`, relationship `entity:`, entity keys), the
+backticks are skipped. The agent follows this automatically; it's worth
+recognizing when you read the YAML.

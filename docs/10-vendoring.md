@@ -77,40 +77,28 @@ docs. Vendoring is designed for projects that already trust each other.
 
 ## How a vendored file is treated differently
 
-Once a file carries a provenance header, modelith knows it is not your work.
-Two things change, and nothing else:
+A provenance line marks the file as a copy whose home is elsewhere. `lint`
+reports every provenance-header defect as a semantic error. It still suppresses
+completeness findings for that copy, because those findings are about content
+owned by its origin.
 
-- **Completeness findings are suppressed.** Missing invariants, entities no
-  scenario exercises, unused enums and glossary terms are gaps in a document
-  its own authors control. Without this, the [GitHub
-  Action](./08-github-action.md) — which lints every matched file — would fail
-  your build over someone else's model.
-- **Its own `imports:` do not receive semantic diagnostics.** A vendored
-  model's imports commonly name paths in *its* repository, which do not exist in
-  yours. Missing or broken nested edges stay silent, along with references that
-  resolve through them; readable local edges still participate in provenance
-  verification.
+Its own `imports:` do not receive semantic diagnostics. A vendored model's
+imports commonly name paths in its home repository that do not exist in yours.
+Missing or broken nested edges stay silent, along with references that resolve
+through them; readable local edges still participate in provenance verification.
 
-**Structural and semantic checks still run.** A vendored file that is not a
-valid domain model breaks your build, and that is your problem to solve — by
-fetching a different ref, or by talking to whoever owns it.
+Structural and other semantic checks still run. A vendored file that is not a
+valid domain model, or whose digest no longer matches its header, fails `lint`.
 
-`modelith render --check` skips a vendored file that has no committed `.md`:
-its rendered Markdown belongs to its home repository, so you are not asked to
-commit one. Rendering a vendored model by naming it still works, which is how a
-deep link into it gets something to point at — and once you commit that `.md`,
-`--check` treats it like any other and tells you when refreshing the copy has
-left it stale.
+`modelith render --check` applies its exemptions only to a vendored copy with a
+clean provenance header. It skips a clean copy with no committed `.md`, and it
+also skips a clean copy this version cannot render, such as one using a newer
+schema version. If you commit the copy's `.md` for a deep link, `--check`
+verifies it for staleness. A malformed header does not qualify for those
+render-check exemptions, and `lint` reports the header error.
 
-The one thing `--check` will not do is fail over a vendored model this modelith
-cannot render at all — one written against a newer schema version, say. It says
-it skipped it and moves on; `modelith lint` is where that is reported, once.
-
-Being skipped is an exemption, and it takes a **clean** provenance header to
-claim one. A file whose header has a defect in it — a misplaced line, a missing
-key — is checked like any other model. That way a mistyped comment can never
-quietly switch a gate off: the header defect fails `lint`, and the rendered
-output is still checked.
+The [GitHub Action](./08-github-action.md) applies the same `lint` and
+`render --check` behavior to every matching file.
 
 ## What it will not overwrite
 
