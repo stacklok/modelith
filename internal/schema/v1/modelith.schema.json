@@ -152,9 +152,9 @@
           "minLength": 1
         },
         "subtypeOf": {
-          "description": "Names the entity this one is a kind of — an is-a / generalization link. Must reference a defined entity. The parent's invariants are understood to hold for this entity too.",
+          "description": "Names the entity this one is a kind of — an is-a / generalization link. Reference a local entity by name or an entity in a direct import as scope.Name. Imported ancestry and invariants are not followed.",
           "type": "string",
-          "pattern": "^[A-Z][A-Za-z0-9]+$"
+          "pattern": "^([A-Z][A-Za-z0-9]+|[a-z][a-z0-9-]*\\.[A-Z][A-Za-z0-9]+)$"
         },
         "relationships": {
           "description": "How this entity relates to others. A relationship is declared under one entity and names a target; it may be declared from either end (the linter checks that the two views agree). When one entity is intuitively the parent — it owns or contains the other, or is the \"one\" side of a one-to-many — prefer declaring the relationship there.",
@@ -211,9 +211,9 @@
       "additionalProperties": false,
       "properties": {
         "entity": {
-          "description": "Name of the related entity. Must reference a defined entity.",
+          "description": "Name of the related entity. Reference a local entity by name or an entity in a direct import as scope.Name.",
           "type": "string",
-          "pattern": "^[A-Z][A-Za-z0-9]+$"
+          "pattern": "^([A-Z][A-Za-z0-9]+|[a-z][a-z0-9-]*\\.[A-Z][A-Za-z0-9]+)$"
         },
         "cardinality": {
           "description": "Relationship cardinality, written \"left:right\". Each side is a multiplicity: \"1\" (exactly one), \"n\" (zero or more), an exact count like \"2\", or a range like \"0..1\", \"1..n\", \"0..5\". \"1:1\", \"1:n\", \"n:1\", and \"n:n\" are the common shorthands. Example: \"1:2\" is exactly two; \"1:1..n\" is at least one.",

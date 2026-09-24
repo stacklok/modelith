@@ -1,0 +1,10 @@
+erDiagram
+    Receipt {
+        string subtypeOf "payments.Invoice"
+    }
+    Visit {}
+    billing.Account {}
+    payments.Invoice {}
+    Visit ||--|| payments.Invoice : ""
+    Visit ||..o{ payments.Invoice : ""
+    Visit }o..|| billing.Account : ""

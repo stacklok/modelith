@@ -366,6 +366,64 @@ func TestImports_Resolution(t *testing.T) {
 	}
 }
 
+// TestADR_0018_QualifiedEntityReferences pins direct-import entity resolution
+// while leaving imported relationship and subtype semantics outside this model's
+// validation boundary.
+func TestADR_0018_QualifiedEntityReferences(t *testing.T) {
+	t.Parallel()
+
+	const entityPath = "/entities/Visit/relationships/0/entity"
+	const subtypePath = "/entities/Receipt/subtypeOf"
+	base := func(target, parent string) string {
+		return fmt.Sprintf(`kind: DomainModel
+version: v1
+imports:
+  - "./payments.modelith.yaml"
+entities:
+  Visit:
+    definition: One car's stay in the garage.
+    relationships:
+      - entity: %s
+        cardinality: "1:1"
+        ownership: owned
+  Receipt:
+    definition: A record of a payment.
+    subtypeOf: %s
+`, target, parent)
+	}
+
+	cases := []struct {
+		name   string
+		target string
+		parent string
+		want   []wantFinding
+	}{
+		{name: "direct imported entities resolve", target: "payments.Invoice", parent: "payments.Invoice"},
+		{
+			name: "unbound scope", target: "shipping.Carrier", parent: "payments.Invoice",
+			want: []wantFinding{{SeverityError, CategorySemantic, entityPath, `references the scope "shipping", which no import binds`}},
+		},
+		{
+			name: "missing imported entity", target: "payments.Receipt", parent: "payments.Invoice",
+			want: []wantFinding{{SeverityError, CategorySemantic, entityPath, `names no entity "Receipt"`}},
+		},
+		{
+			name: "missing imported subtype parent", target: "payments.Invoice", parent: "payments.Receipt",
+			want: []wantFinding{{SeverityError, CategorySemantic, subtypePath, `names no entity "Receipt"`}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res, err := Run(importerPath, []byte(base(tc.target, tc.parent)), fakeFiles{"docs/payments.modelith.yaml": paymentsModel})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertFindings(t, importFindings(res.Findings), tc.want)
+		})
+	}
+}
+
 // TestImports_ContainmentUsesTheFileSeam pins that the boundary is judged
 // against the filesystem the reads go to, not against whatever tree the tests
 // happen to run in. The same model and the same import resolve or are refused
@@ -689,10 +747,10 @@ func (c countingFiles) ReadFile(path string) ([]byte, error) {
 	return c.fakeFiles.ReadFile(path)
 }
 
-// TestRun_QualifiedEntityReferenceIsDeferred checks the friendly error for a
-// cross-model reference in an entity position, and that it replaces — rather
-// than joins — the schema's pattern violation and the undefined-entity finding.
-func TestRun_QualifiedEntityReferenceIsDeferred(t *testing.T) {
+// TestImports_QualifiedEntityReferencesRequireBoundScope checks that entity
+// positions use the same direct-import rule as attribute types. A qualified
+// target is valid syntax, but its scope must be bound by this model.
+func TestImports_QualifiedEntityReferencesRequireBoundScope(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -740,11 +798,11 @@ entities:
 				}
 			}
 			assertFindings(t, at, []wantFinding{{
-				SeverityError, CategoryStructural, tc.path,
-				"is a cross-model reference, which is not supported in an entity position",
+				SeverityError, CategorySemantic, tc.path,
+				`references the scope "payments", which no import binds`,
 			}})
 			if !res.HasBlocking(false) {
-				t.Error("an unsupported cross-model entity reference must block")
+				t.Error("an unbound qualified entity reference must block")
 			}
 			if findingWithMessage(res.Findings, "undefined entity") {
 				t.Errorf("one mistake reported twice: %+v", res.Findings)
@@ -753,14 +811,8 @@ entities:
 	}
 }
 
-// TestImports_EntityPositionReferenceCountsAsUsingTheImport pins R2-3: an
-// import referenced only from an entity position (subtypeOf or
-// relationship.entity) used to get both the "not supported in an entity
-// position" error and a "never referenced — drop it" completeness warning for
-// the same import — contradictory advice, since dropping the import does not
-// fix the unsupported reference. reportQualifiedEntityRefs already knows the
-// scope was reached for; runImports must count that as use, the same as an
-// attribute type would.
+// TestImports_EntityPositionReferenceCountsAsUsingTheImport checks that a valid
+// qualified entity reference is enough to use its direct import.
 func TestImports_EntityPositionReferenceCountsAsUsingTheImport(t *testing.T) {
 	t.Parallel()
 
@@ -778,70 +830,22 @@ entities:
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only the entity-position error is expected: no "/imports/0 ... never
-	// referenced" finding alongside it.
-	assertFindings(t, importFindings(res.Findings), []wantFinding{{
-		SeverityError, CategoryStructural, "/entities/Card/subtypeOf",
-		"is a cross-model reference, which is not supported in an entity position",
-	}})
+	// A valid qualified subtype consumes the import and has no entity-position
+	// error or contradictory unused-import warning.
+	assertFindings(t, importFindings(res.Findings), nil)
 }
 
-// TestRun_QualifiedEntityReferenceReportedOnUnsupportedVersion pins R2-4:
-// reportQualifiedEntityRefs runs inside runStructural, but used to run only
-// after the unsupported-version early return, so a cross-model reference in an
-// entity position went unreported on a document whose version this build
-// doesn't understand — only the version error surfaced. runSemantic and
-// runSubtypes independently skip a value matching the same pattern, trusting
-// that reportQualifiedEntityRefs already reported it; an early return that
-// skips the call makes that trust false. It must run regardless of whether the
-// version is supported.
-func TestRun_QualifiedEntityReferenceReportedOnUnsupportedVersion(t *testing.T) {
-	t.Parallel()
-
-	src := `kind: DomainModel
-version: v99
-entities:
-  Card:
-    definition: A store card.
-    subtypeOf: payments.Card
-    relationships:
-      - entity: payments.Card
-        cardinality: "1:1"
-`
-	res, err := Run(importerPath, []byte(src), fakeFiles{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []wantFinding{
-		{SeverityError, CategoryStructural, "/entities/Card/relationships/0/entity",
-			"is a cross-model reference, which is not supported in an entity position"},
-		{SeverityError, CategoryStructural, "/entities/Card/subtypeOf",
-			"is a cross-model reference, which is not supported in an entity position"},
-	}
-	var got []Finding
-	for _, f := range res.Findings {
-		if f.Path == want[0].path || f.Path == want[1].path {
-			got = append(got, f)
-		}
-	}
-	assertFindings(t, got, want)
-	if !res.HasBlocking(false) {
-		t.Error("an unsupported cross-model entity reference must block even on an unsupported version")
-	}
-}
-
-// TestRun_QualifiedEntityReferenceDoesNotGateTheImportsLayer pins that two
-// unrelated mistakes are reported in one run. The cross-model entity reference
-// used to count as a structural failure, which skipped the imports layer
-// entirely: the broken import below stayed invisible until the subtypeOf was
-// fixed, and fixing it produced a second, unannounced round of errors.
-func TestRun_QualifiedEntityReferenceDoesNotGateTheImportsLayer(t *testing.T) {
+// TestImports_QualifiedEntityReferenceWithMissingImport checks that an import
+// load failure speaks for a qualified entity reference in its claimed scope.
+// Reporting both a missing file and an unbound scope would send the author to
+// fix an import they already declared.
+func TestImports_QualifiedEntityReferenceWithMissingImport(t *testing.T) {
 	t.Parallel()
 
 	src := `kind: DomainModel
 version: v1
 imports:
-  - "./gone.modelith.yaml"
+  - {scope: payments, path: ./gone.modelith.yaml}
 entities:
   Visit:
     definition: One car's stay in the garage.
@@ -852,8 +856,6 @@ entities:
 		t.Fatal(err)
 	}
 	assertFindings(t, importFindings(res.Findings), []wantFinding{
-		{SeverityError, CategoryStructural, "/entities/Visit/subtypeOf",
-			"is a cross-model reference, which is not supported in an entity position"},
 		{SeverityError, CategorySemantic, "/imports/0",
 			`import "./gone.modelith.yaml" cannot be read`},
 	})

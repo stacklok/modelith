@@ -43,6 +43,10 @@ diagram is the structure; the text is the detail.**
 
 The one exception is an entity related to *itself*, which appears as a row
 inside its own box — see [Self-relationships](#self-relationships-live-inside-the-box).
+A qualified relationship target from a direct import also appears as a node,
+labelled with its full `scope.Entity` name. It represents the external entity
+only; its attributes and relationships remain in the imported model's rendered
+document.
 
 ## The lines: relationships and cardinality
 
@@ -201,7 +205,9 @@ them in the text:
   `Owner`"* is an **invariant**, listed under the entity — not something the
   crow's foot captures.
 - **Attributes, derived values, and enums** are in the per-entity tables and the
-  Enums section.
+  Enums section. A qualified `subtypeOf` is the narrow exception: it appears as
+  a `subtypeOf "scope.Entity"` row in the local entity's Mermaid box because
+  Mermaid ER has no generalization edge.
 - **Actions** (what can be done to an entity, and which invariants they
   preserve) are listed per entity.
 

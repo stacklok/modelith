@@ -93,7 +93,7 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 	vendored := runProvenance(path, src, res)
 
 	// Layer 1: structural validation against the JSON Schema.
-	structuralOK, entityScopes := runStructural(src, res)
+	structuralOK := runStructural(src, res)
 
 	// If it does not even parse into our typed model, stop — semantic and
 	// completeness checks need a model to work with. The structural layer has
@@ -121,11 +121,9 @@ func Run(path string, src []byte, files Files) (*Result, error) {
 	// Imports resolve only against a document the schema accepted. A scope the
 	// schema already rejected would otherwise bind anyway, and the advice that
 	// follows would tell the author to write syntax that cannot work — the same
-	// reason the version check gates schema validation. A cross-model reference
-	// in an entity position is not one of those rejections (see runStructural),
-	// so it does not take the imports layer down with it.
+	// reason the version check gates schema validation.
 	if structuralOK {
-		runImports(path, m, files, res, entityScopes, vendored)
+		runImports(path, m, files, res, vendored)
 	}
 	runRelationshipShape(m, res)
 	runSubtypes(m, res)
@@ -152,14 +150,9 @@ func Structural(data []byte) []Finding {
 	return res.Findings
 }
 
-// runStructural validates against the JSON Schema. Returns true if the schema
-// accepted the document — which the cross-model entity references reported here
-// do not affect, since they are a supported-feature limit rather than a shape
-// the imports list depends on — plus the scopes those references named, so the
-// imports layer can tell an import that exists to support one of them from one
-// genuinely unreferenced (runSemantic and runSubtypes rely on every such
-// reference having been reported here; see reportQualifiedEntityRefs).
-func runStructural(data []byte, res *Result) (ok bool, entityScopes map[string]bool) {
+// runStructural validates against the JSON Schema and returns whether it accepted
+// the document.
+func runStructural(data []byte, res *Result) bool {
 	jsonBytes, err := yaml.YAMLToJSON(data)
 	if err != nil {
 		res.Findings = append(res.Findings, Finding{
@@ -167,7 +160,7 @@ func runStructural(data []byte, res *Result) (ok bool, entityScopes map[string]b
 			Category: CategoryStructural,
 			Message:  fmt.Sprintf("not valid YAML: %v", err),
 		})
-		return false, nil
+		return false
 	}
 
 	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonBytes))
@@ -177,7 +170,7 @@ func runStructural(data []byte, res *Result) (ok bool, entityScopes map[string]b
 			Category: CategoryStructural,
 			Message:  fmt.Sprintf("could not decode document: %v", err),
 		})
-		return false, nil
+		return false
 	}
 
 	// Dispatch on the declared format version. modelith — not the schema — is
@@ -198,13 +191,7 @@ func runStructural(data []byte, res *Result) (ok bool, entityScopes map[string]b
 					Message: fmt.Sprintf("unsupported schema version %q; this modelith supports: %s "+
 						"(upgrade modelith, or set a supported version)", v, strings.Join(schema.SupportedVersions(), ", ")),
 				})
-				// A cross-model entity reference is reported here regardless of
-				// whether the version is one this build understands: runSemantic and
-				// runSubtypes skip it on the assumption it was, and an early return
-				// before this call would leave it unreported instead of just
-				// unvalidated.
-				_, entityScopes = reportQualifiedEntityRefs(inst, res)
-				return false, entityScopes
+				return false
 			}
 		}
 	}
@@ -216,7 +203,7 @@ func runStructural(data []byte, res *Result) (ok bool, entityScopes map[string]b
 			Category: CategoryStructural,
 			Message:  fmt.Sprintf("internal: %v", err),
 		})
-		return false, nil
+		return false
 	}
 
 	// Say what a cross-model entity reference actually is before the schema
@@ -225,32 +212,27 @@ func runStructural(data []byte, res *Result) (ok bool, entityScopes map[string]b
 	// counted against the document's structural validity: a broken import in the
 	// same file is an unrelated mistake, and holding the imports layer back
 	// until this one is fixed would hide it.
-	qualified, entityScopes := reportQualifiedEntityRefs(inst, res)
-
 	before := len(res.Findings)
 	if err := sch.Validate(inst); err != nil {
 		if ve, ok := err.(*jsonschema.ValidationError); ok {
-			collectLeaves(ve, res, qualified)
-			return len(res.Findings) == before, entityScopes
+			collectLeaves(ve, res)
+			return len(res.Findings) == before
 		}
 		res.Findings = append(res.Findings, Finding{
 			Severity: SeverityError,
 			Category: CategoryStructural,
 			Message:  err.Error(),
 		})
-		return false, entityScopes
+		return false
 	}
-	return true, entityScopes
+	return true
 }
 
-func collectLeaves(e *jsonschema.ValidationError, res *Result, skip map[string]bool) {
+func collectLeaves(e *jsonschema.ValidationError, res *Result) {
 	if len(e.Causes) == 0 {
 		ptr := "/" + strings.Join(e.InstanceLocation, "/")
 		if ptr == "/" {
 			ptr = ""
-		}
-		if skip[ptr] {
-			return
 		}
 		msg := e.Error()
 		if e.ErrorKind != nil {
@@ -265,7 +247,7 @@ func collectLeaves(e *jsonschema.ValidationError, res *Result, skip map[string]b
 		return
 	}
 	for _, c := range e.Causes {
-		collectLeaves(c, res, skip)
+		collectLeaves(c, res)
 	}
 }
 
@@ -336,9 +318,7 @@ func runSemantic(m *model.Model, res *Result) {
 		for i, rel := range ent.Relationships {
 			switch {
 			case qualifiedRefRE.MatchString(rel.Entity):
-				// Already reported as an unsupported cross-model reference by
-				// reportQualifiedEntityRefs; calling it an undefined entity too
-				// would report one mistake twice.
+				// Qualified targets are resolved against direct imports by runImports.
 			case !entitySet[rel.Entity]:
 				res.Findings = append(res.Findings, Finding{
 					Severity: SeverityError,
@@ -590,7 +570,7 @@ func runSubtypes(m *model.Model, res *Result) {
 			continue
 		}
 		if qualifiedRefRE.MatchString(parent) {
-			continue // reported as an unsupported cross-model reference
+			continue // resolved against a direct import; imported ancestry stops here
 		}
 		if _, ok := m.Entities[parent]; !ok {
 			res.Findings = append(res.Findings, Finding{
@@ -678,6 +658,9 @@ func runReciprocity(m *model.Model, res *Result) {
 	byPair := map[string][]decl{}
 	for _, name := range m.EntityNames() {
 		for i, rel := range m.Entities[name].Relationships {
+			if qualifiedRefRE.MatchString(rel.Entity) {
+				continue
+			}
 			pair := []string{name, rel.Entity}
 			sort.Strings(pair)
 			k := pair[0] + "\x00" + pair[1]
@@ -760,6 +743,9 @@ func runReciprocity(m *model.Model, res *Result) {
 // from one end only resolves it.
 func runPairing(m *model.Model, res *Result) {
 	for _, g := range model.EdgeGroups(m) {
+		if qualifiedRefRE.MatchString(g.FirstN) || qualifiedRefRE.MatchString(g.SecondN) {
+			continue
+		}
 		if !g.AmbiguousPairing() {
 			continue
 		}

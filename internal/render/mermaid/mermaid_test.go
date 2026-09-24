@@ -50,6 +50,21 @@ func assertGolden(t *testing.T, m *model.Model, goldenPath string) {
 	}
 }
 
+// TestER_QualifiedTargets renders qualified relationship targets as external
+// nodes and qualified subtype parents as ER attribute rows.
+func TestER_QualifiedTargets(t *testing.T) {
+	t.Parallel()
+	m := &model.Model{Entities: map[string]model.Entity{
+		"Receipt": {Definition: "r", SubtypeOf: "payments.Invoice"},
+		"Visit": {Definition: "v", Relationships: []model.Relationship{
+			{Entity: "payments.Invoice", Cardinality: "1:1", Ownership: "owned"},
+			{Entity: "payments.Invoice", Cardinality: "1:n"},
+			{Entity: "billing.Account", Cardinality: "n:1"},
+		}},
+	}}
+	assertGolden(t, m, "testdata/qualified_targets.golden.mmd")
+}
+
 func TestERDeclaresAllEntities(t *testing.T) {
 	m := &model.Model{Entities: map[string]model.Entity{
 		"Alpha": {Definition: "a"},

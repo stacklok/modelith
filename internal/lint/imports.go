@@ -86,26 +86,23 @@ type importLoadFailure struct {
 	version      string
 }
 
-// runImports resolves the model's imports, checks every qualified attribute
-// type against them, and reports an import nothing references.
-//
-// modelPath is the path of the model being linted; imports resolve relative to
-// its directory. entityScopes are the scopes named by a cross-model reference
-// in an entity position (relationship.entity, subtypeOf) — unsupported there,
-// but still a real reference: an import bound to one of them is not also
-// reported as unreferenced (see reportQualifiedEntityRefs).
+// runImports resolves the model's imports, checks every qualified reference
+// against them, and reports an import nothing references.
 //
 // vendored says the model is a copy whose home is another repository, which
 // silences the errors its imports list would raise here (see loadImports).
-func runImports(modelPath string, m *model.Model, files Files, res *Result, entityScopes map[string]bool, vendored bool) {
+func runImports(modelPath string, m *model.Model, files Files, res *Result, vendored bool) {
 	byScope, claimed := loadImports(modelPath, m, files, res, vendored)
 	used := checkQualifiedTypes(m, byScope, claimed, res)
+	for scope := range checkQualifiedEntities(m, byScope, claimed, res) {
+		used[scope] = true
+	}
 	// An unreferenced import is a completeness finding, alongside the unused
 	// enum and the unused glossary term: vocabulary the model declares and
 	// nothing uses. Sharing their category means sharing their promotion under
 	// --completeness error.
 	for _, scope := range sortedMapKeys(byScope) {
-		if used[scope] || entityScopes[scope] {
+		if used[scope] {
 			continue
 		}
 		imp := byScope[scope]
@@ -326,6 +323,51 @@ func checkQualifiedTypes(m *model.Model, byScope map[string]importedModel, claim
 	return used
 }
 
+// checkQualifiedEntities resolves qualified relationship targets and subtype
+// parents against direct imports. Their imported semantics end at the boundary:
+// local reciprocity, ownership, and subtype traversal do not inspect that model.
+func checkQualifiedEntities(m *model.Model, byScope map[string]importedModel, claimed map[string]string, res *Result) map[string]bool {
+	used := map[string]bool{}
+	check := func(path, ref, kind string) {
+		match := qualifiedRefRE.FindStringSubmatch(ref)
+		if match == nil {
+			return
+		}
+		scope, item := match[1], match[2]
+		imp, ok := byScope[scope]
+		if !ok {
+			if _, listed := claimed[scope]; listed {
+				used[scope] = true
+				return
+			}
+			res.Findings = append(res.Findings, Finding{
+				Severity: SeverityError,
+				Category: CategorySemantic,
+				Path:     path,
+				Message:  fmt.Sprintf("%s %q references the scope %q, which no import binds — add the model that defines %s to `imports:`", kind, ref, scope, item),
+			})
+			return
+		}
+		used[scope] = true
+		if _, ok := imp.model.Entities[item]; !ok {
+			res.Findings = append(res.Findings, Finding{
+				Severity: SeverityError,
+				Category: CategorySemantic,
+				Path:     path,
+				Message:  fmt.Sprintf("%s %q names no entity %q in %q — check the name, or whether you meant to import a different model", kind, ref, item, imp.path),
+			})
+		}
+	}
+	for _, name := range m.EntityNames() {
+		ent := m.Entities[name]
+		check(fmt.Sprintf("/entities/%s/subtypeOf", name), ent.SubtypeOf, "subtype parent")
+		for i, rel := range ent.Relationships {
+			check(fmt.Sprintf("/entities/%s/relationships/%d/entity", name, i), rel.Entity, "relationship target")
+		}
+	}
+	return used
+}
+
 // unresolvedItemMessage explains a qualified type whose scope resolved but
 // whose item is not there.
 //
@@ -393,65 +435,4 @@ func malformedRefReason(typ string) string {
 	default:
 		return fmt.Sprintf("the item name %q is not PascalCase", item)
 	}
-}
-
-// reportQualifiedEntityRefs reports a cross-model reference in an entity
-// position — relationship.entity or subtypeOf. It returns the instance paths
-// it reported, so the schema's own finding for the same value is suppressed,
-// and the scopes those references named, so an import that exists to support
-// one of them is not also reported as unreferenced (runImports) even though no
-// attribute type resolves it.
-//
-// Both fields carry pattern ^[A-Z][A-Za-z0-9]+$, so "payments.Card" already
-// fails validation with a message about a pattern. This says what is actually
-// wrong, in the spirit of the unsupported-version check. Cross-model entity
-// references are deferred, not planned against: ADR-0010 records why.
-func reportQualifiedEntityRefs(inst any, res *Result) (reported map[string]bool, scopes map[string]bool) {
-	reported = map[string]bool{}
-	scopes = map[string]bool{}
-	doc, ok := inst.(map[string]any)
-	if !ok {
-		return reported, scopes
-	}
-	entities, ok := doc["entities"].(map[string]any)
-	if !ok {
-		return reported, scopes
-	}
-	report := func(path, value string) {
-		reported[path] = true
-		scope, _, _ := strings.Cut(value, ".")
-		scopes[scope] = true
-		res.Findings = append(res.Findings, Finding{
-			Severity: SeverityError,
-			Category: CategoryStructural,
-			Path:     path,
-			Message: fmt.Sprintf(
-				"%q is a cross-model reference, which is not supported in an entity position — only an attribute `type` can be qualified as scope.Name",
-				value,
-			),
-		})
-	}
-	for _, name := range sortedMapKeys(entities) {
-		ent, ok := entities[name].(map[string]any)
-		if !ok {
-			continue
-		}
-		if parent, ok := ent["subtypeOf"].(string); ok && qualifiedRefRE.MatchString(parent) {
-			report(fmt.Sprintf("/entities/%s/subtypeOf", name), parent)
-		}
-		rels, ok := ent["relationships"].([]any)
-		if !ok {
-			continue
-		}
-		for i, r := range rels {
-			rel, ok := r.(map[string]any)
-			if !ok {
-				continue
-			}
-			if target, ok := rel["entity"].(string); ok && qualifiedRefRE.MatchString(target) {
-				report(fmt.Sprintf("/entities/%s/relationships/%d/entity", name, i), target)
-			}
-		}
-	}
-	return reported, scopes
 }
