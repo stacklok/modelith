@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stacklok/modelith/internal/deps"
 	"github.com/stacklok/modelith/internal/lint"
@@ -23,7 +25,7 @@ func run(t *testing.T, args ...string) (string, error) {
 	root.SetOut(&buf)
 	root.SetErr(&buf)
 	root.SetArgs(args)
-	err := root.Execute()
+	err := root.ExecuteContext(context.Background())
 	return buf.String(), err
 }
 
@@ -838,5 +840,61 @@ func TestSchemaOutputsValidJSON(t *testing.T) {
 	var v any
 	if err := json.Unmarshal([]byte(out), &v); err != nil {
 		t.Fatalf("schema output is not valid JSON: %v", err)
+	}
+}
+
+// TestDepsImportTimeoutFlagParses pins that --timeout is accepted with a
+// duration and with 0 (the explicit opt-out), and that its default is 60s.
+// The import fails on the unsupported host before any fetch, so no gh/az runs
+// and the test needs no network.
+func TestDepsImportTimeoutFlagParses(t *testing.T) {
+	dir := t.TempDir()
+	cmd := depsImportCmd()
+	if d, err := cmd.Flags().GetDuration("timeout"); err != nil || d != 60*time.Second {
+		t.Fatalf("default --timeout = %v (%v), want 60s", d, err)
+	}
+
+	for _, tc := range []struct{ name, val string }{
+		{"a duration", "5s"},
+		{"an explicit opt-out", "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, _ := time.ParseDuration(tc.val)
+			cmd := depsImportCmd()
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetErr(&buf)
+			cmd.SetArgs([]string{"--timeout", tc.val,
+				"https://gitlab.com/acme/billing/-/blob/main/m.modelith.yaml", dir})
+			err := cmd.ExecuteContext(context.Background())
+			if err == nil {
+				t.Fatal("expected the unsupported-host error, got nil")
+			}
+			if strings.Contains(err.Error(), "unknown flag") {
+				t.Fatalf("--timeout %s was rejected: %v", tc.val, err)
+			}
+			if !strings.Contains(err.Error(), "github.com/stacklok/modelith/issues") {
+				t.Fatalf("want the unsupported-host error, got: %v", err)
+			}
+			if got, _ := cmd.Flags().GetDuration("timeout"); got != want {
+				t.Errorf("--timeout parsed as %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestExecuteContextInterrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	root := rootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"schema"})
+
+	err := root.ExecuteContext(ctx)
+	if err == nil {
+		t.Fatal("expected error when executing with canceled context, got nil")
 	}
 }

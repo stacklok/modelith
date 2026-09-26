@@ -5,6 +5,10 @@ and verified offline against a SHA-256 of its own bytes. Vendoring does not
 recurse, the fetch is `gh`-only, and the trust warning prints rather than
 blocks. Supersedes ADR-0010's **Digest** section; the rest of ADR-0010 stands.
 
+> **Amended 2026-09-26.** The **`gh` is the only transport** decision below is
+> superseded — Azure DevOps is now a second origin for `deps import`. Everything
+> else in this record stands unchanged; see the Amendment at the end.
+
 ## Context
 
 ADR-0010 specified vendoring in full before any of it was built. Implementing
@@ -143,3 +147,81 @@ step is the real gate.
   case for that rule, since it is where someone else's prose lands in your
   published document, but it shares no code with this change and is a visibly
   broken document rather than a privilege boundary.
+
+## Amendment — Azure DevOps as a second transport (2026-09-26)
+
+This amendment supersedes the **`gh` is the only transport** decision above.
+Nothing else in this record changes: the content digest, the header shape, the
+suppression rules, the non-recursive fetch, and the print-don't-block warning
+all stand.
+
+ADR-0007 set the bar for a second transport at "a real user exists". That user
+arrived: canonical domain models hosted in private Azure DevOps Git
+repositories (`dev.azure.com`). `deps import` now accepts a `dev.azure.com` blob
+URL alongside a `github.com` one.
+
+**Delegation, not a transport.** The fetch still hands off to an external CLI,
+executed as an argv array with no shell, so `modelith` acquires no HTTP client,
+no TLS configuration, and no credential handling (ADR-0011). Where GitHub
+delegates to `gh api`, Azure DevOps delegates to `az rest`. Authentication is
+whatever the user's own CLI session is — `gh auth login`, `az login` — and the
+binary never sees a token. An earlier revision of this work fetched through
+`curl` with a token read from `az account get-access-token`; it was reverted,
+because routing a credential through the binary's argument list breaks the
+no-credential property ADR-0011 keeps, and no `curl` invocation restores it.
+
+**The AAD audience is passed explicitly.** `az rest` cannot derive an Azure
+DevOps audience from a `dev.azure.com` URL, so requests carry
+`--resource 499b84ac-1321-427f-aa17-267ca6975798`, the well-known Microsoft
+first-party application ID for Azure DevOps. That is a fact about the `az` CLI,
+not configuration modelith invents.
+
+**Byte fidelity is a fetch-path concern.** `az rest` appends a newline when it
+prints a raw body to stdout, which by itself moves the copy's digest off
+canonical. Content is therefore written to a temp file with `--output-file` and
+read back, so the vendored bytes match the origin by construction rather than by
+trusting a printer. `gh` needs no such step; it returns the raw body unchanged.
+
+**The header keeps its shape.** `fetch: git` still names what the origin *is*,
+and the recorded `origin` is the repository URL
+(`https://dev.azure.com/<org>/<project>/_git/<repo>`), so no header migration is
+needed and an ADO copy is verified offline against its digest exactly like a
+GitHub one. A legacy `*.visualstudio.com` URL is refused at parse time with a
+pointer to the `dev.azure.com` address, since the host moved.
+
+**Process lifecycle is bounded.** A delegated command that spawns helpers
+inheriting its pipes can hold `Wait()` open past a context deadline. On Unix the
+whole process group is killed (`Setpgid` plus a negative-PID `SIGKILL`), with
+`cmd.WaitDelay` bounding the pipe drain if a helper escapes the group; on
+Windows, which has no POSIX process groups, the direct child is killed and
+`WaitDelay` still bounds the wait. A `--timeout` decorator gives each delegated
+command its own deadline, and the resulting message distinguishes a fired
+deadline from a caller's cancel (e.g. Ctrl+C) rather than reporting both as a
+timeout.
+
+**Scope: import today, refresh later.** This amendment covers `deps import`.
+`deps check` and `deps update` reach the origin through `gh` and rebuild a
+GitHub-shaped address from the header, so a copy vendored from Azure DevOps
+cannot yet be refreshed; such a copy is refused up front, with an error naming
+the host and the remedy, rather than failing as a malformed URL. Extending
+refresh to a second host means rebuilding an ADO address from what a header
+records — which does not include the ADO `project` or the `version=` prefix —
+so it is recorded here as follow-up work, not as a claim this amendment makes.
+
+Pinned by `TestImport_ADO_StampsAVerifiableCopy` and the rest of the
+`TestImport_ADO_*` set (import end to end, the ref-type prefixes, and the
+`--ref` override), `TestExecRunner_KillsTheWholeProcessGroup` and
+`TestExecRunner_WaitDelayBoundsAPipeHeldByAStrayChild` (the process lifecycle),
+the `TestTimeoutRunner_*` set (the deadline message), and
+`TestRefresh_RefusesAnOriginItCannotReach` (the refresh scope limit).
+
+### Amendment consequences
+
+- `deps import` accepts `github.com` and `dev.azure.com` URLs.
+- `az` is a runtime prerequisite for Azure DevOps origins, the way `gh` is for
+  GitHub; the "not installed" hint names the right CLI for the one that is
+  missing.
+- Offline `lint` verifies an Azure DevOps copy against its digest identically to
+  a GitHub one.
+- `deps check` and `deps update` remain `github.com`-only and refuse an Azure
+  DevOps copy with an actionable error.

@@ -326,6 +326,18 @@ func sourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 			"modelith cannot refresh a copy fetched with %q — this build knows how to fetch %s",
 			h.Fetch, strings.Join(provenance.Methods(), ", "))
 	}
+	// A copy vendored from another host cannot be refreshed by this build: check
+	// and update both reach the origin through gh, which speaks only GitHub, and
+	// the address rebuilt below is a GitHub shape ("/<origin>/blob/<ref>/<path>").
+	// Refusing here, where the address is assembled, keeps the error about the
+	// gap rather than about a URL the user never wrote — the GitHub-shaped URL
+	// handed to ParseSource would instead fail as an ADO URL missing its ?path=
+	// query, which reads as a mistake in the header.
+	if host := originHost(h.Origin); host != "" && host != "github.com" {
+		return Source{}, fmt.Errorf(
+			"cannot be refreshed: it was vendored from %s, and deps check and deps update fetch through gh, which speaks only GitHub. To take a newer version, import it again from its origin (`modelith deps import <the file's address>`) — that overwrites this copy with the origin's current file. Refresh for hosts other than github.com is not written yet; if you need it, please open an issue at %s",
+			host, issuesURL)
+	}
 	return ParseSource(fmt.Sprintf("%s/blob/%s/%s", normOrigin(h.Origin), escapePath(ref), escapePath(h.Path)), ref)
 }
 

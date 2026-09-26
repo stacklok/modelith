@@ -83,6 +83,98 @@ enums:
       - name: bank-transfer
 `
 
+// vendoredFromADO writes a copy vendored from Azure DevOps — an origin this
+// build's refresh path cannot reach (see sourceFromHeader) — and hands back its
+// path. It is built by the real Import, like vendored, so the fixture is a copy
+// a user could have rather than one hand-assembled to suit an assertion.
+func vendoredFromADO(t *testing.T) string {
+	t.Helper()
+	r := adoRunner(adoContent, adoCommit)
+	res, err := Import(context.Background(), Options{
+		URL: adoBlobURL, Dir: t.TempDir(), Now: importedAt, Run: r,
+	})
+	if err != nil {
+		t.Fatalf("building the ADO fixture: %v", err)
+	}
+	return res.Path
+}
+
+// TestRefresh_RefusesAnOriginItCannotReach pins the ADO refresh limit: deps
+// check and deps update reach the origin through gh, which speaks only GitHub,
+// so a copy vendored from Azure DevOps cannot be refreshed. The refusal has to
+// be a per-file Report that names the host and points at the remedy, has to
+// measure nothing and write nothing, and must not call out at all — the origin
+// is on a host this build has no transport for.
+func TestRefresh_RefusesAnOriginItCannotReach(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		run  func(t *testing.T, r Runner, path string) Report
+	}{
+		{"check", func(t *testing.T, r Runner, path string) Report {
+			return check(t, r, path)[0]
+		}},
+		{"update", func(t *testing.T, r Runner, path string) Report {
+			return update(t, r, "", path)[0]
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := vendoredFromADO(t)
+			before := readFile(t, path)
+
+			// A runner that would answer, and answer "moved", were the refusal
+			// absent: a check that proceeded would mark the copy stale, and an
+			// update would rewrite it. Neither may happen.
+			r := &fakeRunner{content: moved, sha: laterSHA}
+			rep := tc.run(t, r, path)
+
+			if rep.Err == nil {
+				t.Fatal("an ADO copy was refreshed without an error")
+			}
+			for _, want := range []string{"dev.azure.com", "gh", issuesURL} {
+				if !strings.Contains(rep.Err.Error(), want) {
+					t.Errorf("the refusal does not mention %q:\n%v", want, rep.Err)
+				}
+			}
+			if rep.State != nil {
+				t.Error("a copy this build cannot reach was measured anyway")
+			}
+			if got := readFile(t, path); got != before {
+				t.Error("the copy was rewritten despite the refusal")
+			}
+			if len(r.calls) != 0 {
+				t.Errorf("the refusal still called out %d time(s): %v", len(r.calls), r.calls)
+			}
+		})
+	}
+}
+
+// TestRefresh_ADORefusalDoesNotStopTheRun pins that the refusal above is a
+// per-file Report and not a batch abort: a repository holding both an ADO copy
+// and a GitHub one still gets a verdict on the GitHub copy, which is the whole
+// reason the gap is reported per file rather than raised as a run error.
+func TestRefresh_ADORefusalDoesNotStopTheRun(t *testing.T) {
+	t.Parallel()
+
+	ghPath, r := vendored(t, upstream)
+	adoPath := vendoredFromADO(t)
+
+	reports := check(t, r, adoPath, ghPath)
+	if len(reports) != 2 {
+		t.Fatalf("got %d reports, want one per file", len(reports))
+	}
+	if reports[0].Err == nil {
+		t.Error("the ADO copy was not refused")
+	}
+	if got := reports[1]; got.Err != nil {
+		t.Errorf("the GitHub copy was not judged: %v", got.Err)
+	} else if got.State == nil || got.Stale() {
+		t.Errorf("the GitHub copy got no clean verdict: %+v", got)
+	}
+}
+
 func TestCheck_ReportsWhetherTheOriginMoved(t *testing.T) {
 	t.Parallel()
 
@@ -589,6 +681,7 @@ func TestSourceFromHeader_RoundTripsWhatParseSourceDecoded(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := Source{
+				Host:   HostGitHub,
 				Origin: "https://github.com/acme/billing", Owner: "acme", Repo: "billing",
 				Ref: tc.ref, Path: tc.path,
 			}
