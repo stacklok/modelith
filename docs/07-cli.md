@@ -132,6 +132,10 @@ Checks vendored copies against their origins and exits non-zero when a copy is
 stale or cannot be reached. It writes nothing and skips files without provenance
 headers. Copies from github.com and dev.azure.com are both checked.
 
+| Flag | Default | Description |
+|---|---|---|
+| `--timeout` | `60s` | Maximum duration for each delegated `gh` or `az` fetch; `0` disables the limit. |
+
 ```sh
 modelith deps check docs/*.modelith.yaml
 ```
@@ -141,6 +145,11 @@ modelith deps check docs/*.modelith.yaml
 Updates vendored copies from their origins, for copies from github.com and
 dev.azure.com alike. `--ref` re-pins one copy to a tag or branch; it accepts
 exactly one file. The command does not edit `imports:` or lint the result.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--ref` | header's ref | Re-pin one copy to this ref (a tag or branch). One file only. |
+| `--timeout` | `60s` | Maximum duration for each delegated `gh` or `az` fetch; `0` disables the limit. |
 
 ```sh
 modelith deps update docs/*.modelith.yaml

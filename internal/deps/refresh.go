@@ -131,8 +131,8 @@ type UpdateOptions struct {
 // CI and against a read-only checkout.
 //
 // A per-file failure lands in that file's Report and the run continues. A
-// non-nil error means the run stopped before it could measure a file because gh
-// was unusable while fetching its content.
+// non-nil error means the run stopped before it could measure a file because
+// the delegated CLI (gh or az) was unusable while fetching its content.
 func Check(ctx context.Context, opts CheckOptions) ([]Report, error) {
 	return survey(ctx, surveyOptions{paths: opts.Paths, timeout: opts.Timeout, run: opts.Run})
 }
