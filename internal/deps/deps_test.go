@@ -3,6 +3,7 @@ package deps
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -80,16 +81,34 @@ func (f *fakeRunner) runAz(args []string) ([]byte, error) {
 		return nil, fmt.Errorf("az: HTTP 404: Not Found (%s)", uri)
 	}
 	switch {
-	case strings.Contains(uri, "/items"):
-		// Validate that a known version prefix produces the right versionType.
-		// GB→branch, GT→tag, GC→commit. When the prefix is absent or unknown,
-		// versionType is omitted (the API auto-detects).
-		if strings.Contains(uri, "versionType") {
-			if !strings.Contains(uri, "versionType=branch") &&
-				!strings.Contains(uri, "versionType=tag") &&
-				!strings.Contains(uri, "versionType=commit") {
-				return nil, fmt.Errorf("az: unexpected versionType in %q", uri)
+	case strings.Contains(uri, "/refs"):
+		// The refs API, used to resolve a ref whose type the URL did not name.
+		// The filter is the ref name without its "refs/" prefix ("heads/main").
+		filter := ""
+		if i := strings.Index(uri, "filter="); i >= 0 {
+			rest := uri[i+len("filter="):]
+			if j := strings.IndexByte(rest, '&'); j >= 0 {
+				rest = rest[:j]
 			}
+			if v, err := url.QueryUnescape(rest); err == nil {
+				filter = v
+			}
+		}
+		if _, ok := adoRefs[filter]; ok {
+			return []byte("refs/" + filter + "\n"), nil
+		}
+		return nil, nil
+	case strings.Contains(uri, "/items"):
+		// Mirror the API's version handling, including its default: an omitted
+		// versionType is read as a *branch*, not inferred. A copy pinned to a
+		// tag or commit therefore 404s while the type is unset — the real
+		// behaviour this models, so a test can catch a missing resolution.
+		vt, ver := adoVersionParams(uri)
+		if vt == "" {
+			vt = "branch"
+		}
+		if !adoVersionKnown(vt, ver, f.sha) {
+			return nil, fmt.Errorf("az: TF401175: The version descriptor <%s: %s> could not be resolved to a version (https://dev.azure.com/x/_apis/git/repositories/y/items)", adoTypeLabel(vt), ver)
 		}
 		// The real fetch writes the body to --output-file (az rest appends a
 		// newline when printing a body to stdout, which would drift the
@@ -122,9 +141,88 @@ func (f *fakeRunner) runAz(args []string) ([]byte, error) {
 		if strings.Contains(uri, "\\$top") {
 			return nil, fmt.Errorf("az: $top is shell-escaped, but ExecRunner uses argv (no shell)")
 		}
+		// The commits query is typed the same way the items request is, so the
+		// same resolution rule applies.
+		vt, ver := adoVersionParams(uri)
+		if vt == "" {
+			vt = "branch"
+		}
+		if !adoVersionKnown(vt, ver, f.sha) {
+			return nil, fmt.Errorf("az: TF401175: the commits query could not resolve <%s: %s>", adoTypeLabel(vt), ver)
+		}
 		return []byte(f.sha + "\n"), nil
 	}
 	return nil, fmt.Errorf("az: unexpected uri %q", uri)
+}
+
+// adoRefs are the refs the fake repository serves, keyed the way the refs API's
+// filter names them.
+var adoRefs = map[string]bool{
+	"heads/main":       true,
+	"tags/v1.0.0":      true,
+	"heads/release/v2": true,
+}
+
+// adoVersionParams reads the version and its type out of an ADO URI. The items
+// endpoint names them versionDescriptor.version[Type]; the commits endpoint,
+// searchCriteria.itemVersion.version[Type].
+func adoVersionParams(uri string) (vt, ver string) {
+	get := func(key string) string {
+		i := strings.Index(uri, key+"=")
+		if i < 0 {
+			return ""
+		}
+		rest := uri[i+len(key)+1:]
+		if j := strings.IndexByte(rest, '&'); j >= 0 {
+			rest = rest[:j]
+		}
+		v, err := url.QueryUnescape(rest)
+		if err != nil {
+			return ""
+		}
+		return v
+	}
+	for _, k := range []string{"versionDescriptor.versionType", "searchCriteria.itemVersion.versionType"} {
+		if v := get(k); v != "" {
+			vt = v
+			break
+		}
+	}
+	for _, k := range []string{"versionDescriptor.version", "searchCriteria.itemVersion.version"} {
+		if v := get(k); v != "" {
+			ver = v
+			break
+		}
+	}
+	return vt, ver
+}
+
+// adoVersionKnown reports whether the fake repository can resolve a typed
+// version. A commit is any value equal to the fixture sha.
+func adoVersionKnown(vt, ver, sha string) bool {
+	switch vt {
+	case "commit":
+		return ver == sha
+	case "branch", "tag":
+		prefix := "heads/"
+		if vt == "tag" {
+			prefix = "tags/"
+		}
+		return adoRefs[prefix+ver]
+	}
+	return false
+}
+
+func adoTypeLabel(vt string) string {
+	switch vt {
+	case "branch":
+		return "Branch"
+	case "tag":
+		return "Tag"
+	case "commit":
+		return "Commit"
+	}
+	return vt
 }
 
 const upstream = `# yaml-language-server: $schema=https://modelith.sh/schema/domain-model/v1.json
@@ -811,7 +909,7 @@ func TestParseSource_ADO(t *testing.T) {
 			},
 		},
 		{
-			name: "an explicit ref resets RefType so the API auto-detects",
+			name: "an explicit ref leaves RefType unset for the fetch path to resolve",
 			raw:  "https://dev.azure.com/myorg/myproject/_git/myrepo?path=docs/payments.modelith.yaml&version=GBmain",
 			ref:  "v1.0.0",
 			want: Source{
@@ -937,7 +1035,7 @@ func TestParseSource_ADO(t *testing.T) {
 			wantErr: "has no version parameter",
 		},
 		{
-			name: "a bare version with no prefix uses the auto-detect path",
+			name: "a bare version with no prefix leaves RefType to be resolved",
 			raw:  "https://dev.azure.com/myorg/myproject/_git/myrepo?path=docs/payments.modelith.yaml&version=main",
 			want: Source{
 				Host:    HostADO,
@@ -1114,33 +1212,85 @@ func TestImport_ADO_CommitUsesVersionTypeCommit(t *testing.T) {
 }
 
 // TestImport_ADO_OverrideRefOmitsVersionType pins that when --ref overrides
-// the URL's ref, the API call omits versionType so ADO auto-detects.
-func TestImport_ADO_OverrideRefOmitsVersionType(t *testing.T) {
+// the URL's ref, the value is left untyped for the fetch path to resolve.
+// TestImport_ADO_OverrideRefResolvesTheType pins that a --ref override on an ADO
+// URL is typed before it is fetched. The override names a ref the URL's GB/GT/GC
+// prefix does not describe, and the API does not infer a type — an untyped
+// request is read as a branch — so the type is resolved from the repository's
+// refs. Here the override names a tag, so the request must ask for a *tag*, not
+// fall through to the API's branch default.
+func TestImport_ADO_OverrideRefResolvesTheType(t *testing.T) {
 	t.Parallel()
 
 	r := adoRunner(adoContent, adoCommit)
-	// URL has GBmain (branch), but --ref overrides to a tag-like value.
-	url := adoBlobURL
-	_, err := Import(context.Background(), Options{
-		URL: url,
+	res, err := Import(context.Background(), Options{
+		URL: adoBlobURL, // names GBmain, overridden below
 		Dir: t.TempDir(),
-		Ref: "v1.0.0",
+		Ref: "v1.0.0", // a tag in the fake repository
 		Now: time.Date(2026, 7, 27, 12, 0, 0, 0, time.Local),
 		Run: r,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if res.Header.RefType != "tag" {
+		t.Errorf("the header recorded ref-type %q, want %q — the override named a tag", res.Header.RefType, "tag")
+	}
+
+	var sawRefs, sawTypedFetch bool
 	for _, call := range r.calls {
 		for i, a := range call {
-			if a == "--uri" && i+1 < len(call) {
-				uri := call[i+1]
-				if strings.Contains(uri, "versionType") {
-					t.Errorf("--ref override should omit versionType, got %q", uri)
-				}
-				if !strings.Contains(uri, "version=v1.0.0") {
-					t.Errorf("--ref override should use the override value in version=, got %q", uri)
-				}
+			if a != "--uri" || i+1 >= len(call) {
+				continue
+			}
+			uri := call[i+1]
+			if strings.Contains(uri, "/refs?") {
+				sawRefs = true
+				continue
+			}
+			if !strings.Contains(uri, "version=v1.0.0") {
+				t.Errorf("a fetch did not use the override value in version=: %q", uri)
+				continue
+			}
+			if !strings.Contains(uri, "versionType=tag") {
+				t.Errorf("a fetch did not ask for the resolved type (tag): %q", uri)
+				continue
+			}
+			sawTypedFetch = true
+		}
+	}
+	if !sawRefs {
+		t.Error("the type was never resolved with a refs lookup")
+	}
+	if !sawTypedFetch {
+		t.Error("no fetch carried the resolved versionType")
+	}
+}
+
+// TestImport_ADO_OverrideRefCommitNeedsNoRefsLookup pins the cheap half of
+// resolution: a git object id names a commit and nothing else, so an override
+// that is one is typed without asking the refs API.
+func TestImport_ADO_OverrideRefCommitNeedsNoRefsLookup(t *testing.T) {
+	t.Parallel()
+
+	r := adoRunner(adoContent, adoCommit)
+	res, err := Import(context.Background(), Options{
+		URL: adoBlobURL,
+		Dir: t.TempDir(),
+		Ref: adoCommit,
+		Now: time.Date(2026, 7, 27, 12, 0, 0, 0, time.Local),
+		Run: r,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Header.RefType != "commit" {
+		t.Errorf("the header recorded ref-type %q, want %q", res.Header.RefType, "commit")
+	}
+	for _, call := range r.calls {
+		for i, a := range call {
+			if a == "--uri" && i+1 < len(call) && strings.Contains(call[i+1], "/refs?") {
+				t.Errorf("a commit sha was resolved with a needless refs lookup: %q", call[i+1])
 			}
 		}
 	}

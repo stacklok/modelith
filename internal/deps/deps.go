@@ -284,7 +284,7 @@ func parseADOSource(u *url.URL, ref string) (Source, error) {
 	}
 	if ref != "" {
 		src.Ref = ref
-		src.RefType = "" // let the ADO API auto-detect the ref type
+		src.RefType = "" // not named by the URL; the fetch path resolves it
 	}
 	if src.Ref == "" {
 		return Source{}, fmt.Errorf(
@@ -347,6 +347,12 @@ func Import(ctx context.Context, opts Options) (*Result, error) {
 	}
 	if opts.Timeout > 0 {
 		runner = timeoutRunner{inner: runner, timeout: opts.Timeout}
+	}
+	// An ADO source whose type the URL did not name — a bare version=, or a
+	// --ref override — has to be resolved before it is fetched, because the API
+	// does not infer the type: an untyped request is read as a branch.
+	if err := resolveADORefType(ctx, runner, &src); err != nil {
+		return nil, err
 	}
 
 	// One dispatch, not two: the transport is chosen from the source's host, so
@@ -502,21 +508,103 @@ func fetchCommitFor(ctx context.Context, runner Runner, src Source) (string, err
 	return fetchCommit(ctx, runner, src)
 }
 
-// recordedRefType is the ref-type a provenance header records for src: the ADO
-// version type when the URL's GB/GT/GC prefix named one, "auto" when the ADO
-// API is left to infer it (an unprefixed version=, or a --ref override), and
-// empty for GitHub — whose API resolves an untyped ref on its own, and whose
-// headers predate this key. Recording it is what lets a later refresh rebuild
-// the same typed request, which is not equivalent to auto-detection when a
-// branch and a tag share a name.
+// recordedRefType is the ref-type a provenance header records for src. It is
+// the ADO version type — branch, tag, or commit — and empty for GitHub, whose
+// API resolves an untyped ref on its own and whose headers predate this key.
+//
+// It is empty rather than "auto" when the type is unknown, which only happens
+// if a caller skipped resolveADORefType; leaving the key out makes a later
+// refresh resolve it, so the omission is self-healing rather than a lie about
+// the API inferring something it does not infer.
 func recordedRefType(src Source) string {
 	if src.Host != HostADO {
 		return ""
 	}
-	if vt := adoVersionType(src); vt != "" {
-		return vt
+	return adoVersionType(src)
+}
+
+// resolveADORefType fills in src.RefType when the source names no type, by
+// asking the API what the ref is. It is a no-op for GitHub, for an ADO source
+// whose URL already carried a GB/GT/GC prefix, and for one whose header
+// recorded a type.
+//
+// It must run before any ADO fetch: the API does not infer a version's type.
+// An untyped request is read as a branch (verified against 7.1/7.1-preview.1/
+// 7.2-preview.1: omitting versionDescriptor.versionType on a commit sha fails
+// with "The version descriptor <Branch: <sha>> could not be resolved"), so a
+// copy pinned to a tag or a commit cannot be fetched while the type is unknown.
+func resolveADORefType(ctx context.Context, runner Runner, src *Source) error {
+	if src.Host != HostADO || adoVersionType(*src) != "" {
+		return nil
 	}
-	return "auto"
+	// A git object id names a commit and nothing else, so it needs no call.
+	if isCommitSHA(src.Ref) {
+		src.RefType = "commit"
+		return nil
+	}
+	// Otherwise ask the refs API. A ref name and a tag name can collide, and a
+	// version is one or the other; a branch is preferred because that is what
+	// the API itself defaults to, and a tag is reachable from the URL's GT form.
+	branch, err := adoRefExists(ctx, runner, *src, "heads/"+src.Ref)
+	if err != nil {
+		return err
+	}
+	if branch {
+		src.RefType = "branch"
+		return nil
+	}
+	tag, err := adoRefExists(ctx, runner, *src, "tags/"+src.Ref)
+	if err != nil {
+		return err
+	}
+	if tag {
+		src.RefType = "tag"
+		return nil
+	}
+	return fmt.Errorf(
+		"%q is neither a branch, a tag, nor a commit in %s/%s, so its type cannot be resolved. Check the ref, or name the type in the URL's version= parameter (GB<branch>, GT<tag>, or GC<commit>)",
+		src.Ref, src.Owner, src.Repo)
+}
+
+// adoRefExists reports whether the repository has the named ref. The filter is
+// the ref name without its "refs/" prefix — "heads/main", "tags/v1.0.0" — which
+// is what the API's filter parameter matches (verified: filter=heads/main
+// returns refs/heads/main, while filter=main returns nothing).
+func adoRefExists(ctx context.Context, runner Runner, src Source, ref string) (bool, error) {
+	uri := fmt.Sprintf(
+		"https://dev.azure.com/%s/%s/_apis/git/repositories/%s/refs?filter=%s&api-version=7.1",
+		url.PathEscape(src.Owner), url.PathEscape(src.Project),
+		url.PathEscape(src.Repo), url.QueryEscape(ref))
+	out, err := runner.Run(ctx, "az", "rest", "--method", "get",
+		"--resource", adoResourceID, "--uri", uri, "--query", "value[].name", "-o", "tsv")
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(line) == "refs/"+ref {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// isCommitSHA reports whether s is a git object id: 40 hex digits (SHA-1) or 64
+// (SHA-256). ADO accepts such a value as versionDescriptor.version with a commit
+// type, and nothing else.
+func isCommitSHA(s string) bool {
+	switch len(s) {
+	case 40, 64:
+	default:
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // fetchContent returns the file's bytes. The raw media type asks the API for
@@ -602,7 +690,8 @@ const adoResourceID = "499b84ac-1321-427f-aa17-267ca6975798"
 
 // adoVersionType returns the versionDescriptor.versionType for a Source. When
 // the version prefix was not one of the known three (GB/GT/GC), the API
-// endpoint accepts an empty versionType and auto-detects the ref.
+// endpoint cannot infer the ref type, so an unknown type is resolved before
+// the fetch rather than passed through as an empty versionType.
 func adoVersionType(src Source) string {
 	switch src.RefType {
 	case "branch", "tag", "commit":

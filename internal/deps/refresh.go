@@ -226,6 +226,14 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 		rep.Err = err
 		return rep, nil
 	}
+	// An ADO ref whose type the header did not record, or one a --ref re-pin
+	// renamed, has to be resolved before the fetch: the API does not infer the
+	// type, so an untyped request is read as a branch and a tag- or
+	// commit-pinned copy would 404.
+	if err := resolveADORefType(ctx, runner, &src); err != nil {
+		rep.Err = err
+		return rep, nil
+	}
 
 	upstream, err := fetchContentFor(ctx, runner, src)
 	if err != nil {
@@ -299,9 +307,9 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 	next := *h
 	next.Ref = ref
 	// The ref type is not copied from the old header: a repin changes what the
-	// ref names, and even a bare refresh may have had its type inferred, so the
-	// record is rebuilt from what the fetch actually resolved to. It is empty
-	// for GitHub, which keeps its header shape.
+	// ref names, and an untyped source may have had its type resolved by a refs
+	// lookup during this run. It is recorded from what src now names, and is
+	// empty for GitHub, which keeps its header shape.
 	next.RefType = recordedRefType(src)
 	next.Commit = commit
 	next.Imported = opts.now.Format("2006-01-02")
@@ -372,11 +380,11 @@ func adoSourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 	q := url.Values{}
 	q.Set("path", h.Path)
 	// The prefix encodes the ref's type. On a plain refresh the recorded type
-	// still describes the same ref, so it is reused. A --ref override names a
-	// ref whose type the header cannot know — a branch may be re-pinned to a
-	// tag, and "GBv1.0.0" would ask ADO for a branch that does not exist — so
-	// the prefix is dropped and the API is left to infer it, exactly as an
-	// import with --ref does.
+	// still describes the same ref, so it is reused. A --ref override, or a
+	// header written before the key existed, names a ref whose type is not
+	// recorded: the prefix is dropped and the type resolved by a refs lookup
+	// (resolveADORefType), because the API does not infer it — an untyped
+	// request is read as a branch, so a tag would fail as a branch of that name.
 	prefix := adoVersionPrefix(h.RefType)
 	if ref != h.Ref {
 		prefix = ""
@@ -384,13 +392,14 @@ func adoSourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 	q.Set("version", prefix+ref)
 	u.RawQuery = q.Encode()
 	// The ref type rides in the version prefix, so ParseSource is not asked to
-	// override the ref: an override would reset the type to auto-detect, which
-	// would discard what the header recorded.
+	// override the ref: an override would reset the type, which would discard
+	// what the header recorded.
 	return ParseSource(u.String(), "")
 }
 
-// adoVersionPrefix maps a recorded ref-type to the URL's version prefix, and an
-// empty or "auto" type to none — which is what leaves the ADO API to infer it.
+// adoVersionPrefix maps a recorded ref-type to the URL's version prefix. An
+// empty type yields no prefix, which leaves the source untyped for
+// resolveADORefType to fill in — the API itself would read it as a branch.
 func adoVersionPrefix(refType string) string {
 	switch refType {
 	case "branch":

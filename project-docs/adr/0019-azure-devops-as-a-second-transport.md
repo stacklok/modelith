@@ -44,17 +44,26 @@ because `az rest` appends a newline when it prints a body to stdout — one byte
 that would move the copy's digest off canonical. The bytes then match the origin
 by construction rather than by trusting a printer.
 
-**The header gains one optional key, `ref-type`.** An Azure DevOps version has
-a *type* — `GB` a branch, `GT` a tag, `GC` a commit — and the API takes the type
-alongside the value. Letting the API infer it is not equivalent: a branch and a
-tag may share a name, and the two answer differently. So an ADO import records
-`# modelith-ref-type:` as `branch`, `tag`, or `commit`, or `auto` when the URL
-left the type unprefixed or `--ref` overrode it — the case where inference is
-what was asked for. The key is optional and *omitted* for GitHub, whose API
-resolves an untyped ref on its own, so a GitHub header written before the key
-existed is byte-identical to one written now and needs no migration. An unknown
-value is an error, like an unknown `fetch:` method, which matches ADR-0015's
-closed-set posture pre-release.
+**The header gains one optional key, `ref-type`, and an unknown type is
+resolved rather than inferred.** An Azure DevOps version has a *type* — `GB` a
+branch, `GT` a tag, `GC` a commit — and the API takes the type alongside the
+value. The API does **not** infer a missing type: an untyped
+`versionDescriptor.version` is read as a **branch**, so a copy pinned to a tag
+or a commit cannot be fetched while the type is unset (verified against
+api-version 7.1, 7.1-preview.1, and 7.2-preview.1: a 40-hex value with no type
+fails with "The version descriptor <Branch: …> could not be resolved"). So an
+ADO import records `# modelith-ref-type:` as `branch`, `tag`, or `commit`; the
+key is optional and *omitted* for GitHub, whose API resolves an untyped ref on
+its own, so a GitHub header written before the key existed is byte-identical to
+one written now and needs no migration. When the type is not named — a bare
+`version=`, a `--ref` override, or a header from before the key existed — it is
+**resolved before the fetch**: a git object id (40 or 64 hex) is a commit, and
+anything else is looked up with the refs API under `refs/heads/` and then
+`refs/tags/`. A branch is preferred on a name collision, because that is what
+the API itself defaults to and a tag is reachable from the URL's `GT` form. An
+unknown value is an error, like an unknown `fetch:` method, which matches
+ADR-0015's closed-set posture pre-release. There is deliberately no value
+meaning "let the origin decide": the origin does not decide.
 
 **Refresh is first-class for both hosts.** `deps check` and `deps update`
 dispatch on the origin's host. A `github.com` origin is rebuilt into a blob URL

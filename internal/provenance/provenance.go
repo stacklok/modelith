@@ -44,18 +44,24 @@ type Header struct {
 	Path     string
 	Ref      string
 	// RefType is the kind of ref Ref names, for a host whose API distinguishes
-	// them: "branch", "tag", or "commit", or "auto" when the origin's own API is
-	// left to infer it. It is optional and omitted for a host, such as GitHub,
-	// whose API resolves an untyped ref on its own — so a header written before
-	// this key existed still parses, and a GitHub header keeps its shape.
+	// them: "branch", "tag", or "commit". It is optional and omitted for a host,
+	// such as GitHub, whose API resolves an untyped ref on its own — so a header
+	// written before this key existed still parses, and a GitHub header keeps
+	// its shape. It is also omitted when the type is not known, which the layer
+	// that fetches then resolves; there is no value meaning "let the origin
+	// decide", because the Azure DevOps API does not.
 	RefType  string
 	Commit   string
 	Imported string
 	Digest   string
 }
 
-// refTypes is the closed set a ref-type value may name.
-var refTypes = []string{"branch", "tag", "commit", "auto"}
+// refTypes is the closed set a ref-type value may name. There is deliberately
+// no "auto": the Azure DevOps API does not infer a version's type — an untyped
+// request is read as a branch — so a value meaning "let the API decide" would
+// be a claim the API does not honour. An unknown type is *omitted*, and the
+// layer that fetches resolves it.
+var refTypes = []string{"branch", "tag", "commit"}
 
 // keyOrder is the order Format writes the keys in, and the set of keys that
 // exist at all: a line naming anything else is a Problem.

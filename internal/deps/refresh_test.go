@@ -103,7 +103,7 @@ func vendoredFromADO(t *testing.T) string {
 // TestRefresh_ADOCopyIsFirstClass pins that a copy vendored from Azure DevOps is
 // checked and updated like a GitHub one. The header records the ref type, so
 // refresh rebuilds the same typed request the import made — which is not
-// equivalent to auto-detection when a branch and a tag share a name.
+// equivalent to a refs lookup when a branch and a tag share a name.
 func TestRefresh_ADOCopyIsFirstClass(t *testing.T) {
 	t.Parallel()
 
@@ -153,7 +153,7 @@ func TestRefresh_ADOCopyIsFirstClass(t *testing.T) {
 		}
 	})
 
-	t.Run("the request is typed from the header, not auto-detected", func(t *testing.T) {
+	t.Run("the request is typed from the header, not re-resolved", func(t *testing.T) {
 		t.Parallel()
 		path := vendoredFromADO(t)
 		r := adoRunner(adoContent, adoCommit)
@@ -553,7 +553,13 @@ func (h *hangRunner) Run(ctx context.Context, _ string, _ ...string) ([]byte, er
 // old type prefix. "GBv1.0.0" asks Azure DevOps for a branch of that name, so
 // the request 404s and the copy cannot be re-pinned at all. The header must
 // also stop claiming the ref is a branch.
-func TestRefresh_ADORepinDropsTheRecordedType(t *testing.T) {
+// TestRefresh_ADORepinRetypesTheRef pins the repair of the repin bug and the
+// reason the repair is a resolution rather than an omission. A branch-typed copy
+// is re-pinned to a tag: the old type must not be reused (that asks ADO for a
+// branch named after the tag), and the request must not simply drop the type
+// either — an untyped ADO request is read as a branch, so it would fail the same
+// way. The type has to be looked up and the header rewritten to match.
+func TestRefresh_ADORepinRetypesTheRef(t *testing.T) {
 	t.Parallel()
 
 	path := vendoredFromADO(t)
@@ -567,19 +573,28 @@ func TestRefresh_ADORepinDropsTheRecordedType(t *testing.T) {
 		t.Fatalf("repin failed: %v", rep.Err)
 	}
 
-	// The request must carry no versionType at all: the override names a ref
-	// whose type the header cannot know, so the API is left to infer it.
-	if len(r.calls) == 0 {
-		t.Fatal("the repin made no az call")
-	}
+	// Every fetch the repin made must name the resolved type. An untyped one
+	// would be read as a branch and 404, which the fake models.
+	var typed bool
 	for _, call := range r.calls {
-		if uri := azURI(call); strings.Contains(uri, "versionType") {
-			t.Errorf("the repin pinned a type the header could not know: %s", uri)
+		uri := azURI(call)
+		switch {
+		case uri == "":
+		case strings.Contains(uri, "/refs?"):
+		case strings.Contains(uri, "versionType=branch"):
+			t.Errorf("the repin kept the old branch type onto a tag: %s", uri)
+		case strings.Contains(uri, "versionType=tag"):
+			typed = true
+		default:
+			t.Errorf("a repin fetch carried no versionType, which ADO reads as a branch: %s", uri)
 		}
+	}
+	if !typed {
+		t.Error("no repin fetch asked for the resolved tag type")
 	}
 
 	after := readFile(t, path)
-	for _, want := range []string{"# modelith-ref: v1.0.0", "# modelith-ref-type: auto"} {
+	for _, want := range []string{"# modelith-ref: v1.0.0", "# modelith-ref-type: tag"} {
 		if !strings.Contains(after, want) {
 			t.Errorf("the re-pinned copy does not contain %q:\n%s", want, after)
 		}
@@ -589,9 +604,74 @@ func TestRefresh_ADORepinDropsTheRecordedType(t *testing.T) {
 	}
 }
 
+// TestRefresh_ADORepinToACommitTypesItAsACommit covers the other repin shape:
+// a value that is a git object id is resolved without a refs lookup and fetched
+// as a commit.
+func TestRefresh_ADORepinToACommitTypesItAsACommit(t *testing.T) {
+	t.Parallel()
+
+	path := vendoredFromADO(t)
+	r := adoRunner(adoContent, adoCommit)
+	rep := update(t, r, adoCommit, path)[0]
+	if rep.Err != nil {
+		t.Fatalf("repin to a commit failed: %v", rep.Err)
+	}
+	var sawCommit bool
+	for _, call := range r.calls {
+		uri := azURI(call)
+		if strings.Contains(uri, "versionType=commit") {
+			sawCommit = true
+		}
+		if strings.Contains(uri, "/refs?") {
+			t.Errorf("a commit sha was resolved with a needless refs lookup: %s", uri)
+		}
+	}
+	if !sawCommit {
+		t.Error("the repin did not ask for a commit")
+	}
+	if after := readFile(t, path); !strings.Contains(after, "# modelith-ref-type: commit") {
+		t.Errorf("the header did not record the commit type:\n%s", after)
+	}
+}
+
+// TestRefresh_ADOHeaderWithoutRefTypeResolvesIt pins the compatibility path: a
+// copy imported before the ref-type key existed has no type recorded, so a
+// refresh has to resolve it — and must not issue an untyped request, which ADO
+// would read as a branch.
+func TestRefresh_ADOHeaderWithoutRefTypeResolvesIt(t *testing.T) {
+	t.Parallel()
+
+	path := vendoredFromADO(t)
+	// Drop the key, as a header written by an earlier build would.
+	without := strings.Replace(readFile(t, path), "# modelith-ref-type: branch\n", "", 1)
+	if err := os.WriteFile(path, []byte(without), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := adoRunner(adoContent, adoCommit)
+	rep := check(t, r, path)[0]
+	if rep.Err != nil {
+		t.Fatalf("check failed on a header with no ref-type: %v", rep.Err)
+	}
+	var typed bool
+	for _, call := range r.calls {
+		uri := azURI(call)
+		if strings.Contains(uri, "/refs?") {
+			continue
+		}
+		if !strings.Contains(uri, "versionType=") {
+			t.Errorf("the fetch was untyped, which ADO reads as a branch: %s", uri)
+		}
+		typed = true
+	}
+	if !typed {
+		t.Error("no typed fetch was made")
+	}
+}
+
 // TestRefresh_ADOBareRefreshKeepsTheRecordedType pins the other half: a refresh
 // that does not re-pin must keep asking for the same typed version the import
-// did, because auto-detection is not equivalent when a branch and a tag share a
+// did, because the API's default is not equivalent when a branch and a tag share a
 // name.
 func TestRefresh_ADOBareRefreshKeepsTheRecordedType(t *testing.T) {
 	t.Parallel()

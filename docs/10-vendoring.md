@@ -51,7 +51,7 @@ never has one, and never meets any of this.
 | `vendored` | That this file is a copy. Nothing enforces it; it is there so a person or an agent about to edit the file stops. |
 | `fetch` | How to get it again. `git` today. |
 | `origin`, `path`, `ref` | Where it came from and what to track. A tag in `ref` pins the copy; a branch follows it. |
-| `ref-type` | Azure DevOps only: the kind of ref `ref` names — `branch`, `tag`, `commit`, or `auto` — so a refresh rebuilds the same typed request. Omitted for GitHub, whose API resolves an untyped ref. |
+| `ref-type` | Azure DevOps only: the kind of ref `ref` names — `branch`, `tag`, or `commit`. Omitted for GitHub, whose API resolves an untyped ref, and when the type is not yet known, in which case a refresh resolves it. |
 | `commit` | The commit that last touched *this file* at that ref — so it does not move when unrelated commits land. |
 | `imported` | When you fetched it. |
 | `digest` | SHA-256 of the file with the header lines removed, so stamping the header does not change it. |
@@ -209,10 +209,13 @@ git grep -l '# modelith-vendored'
 An Azure DevOps URL carries a version *type* (`GB` branch, `GT` tag, `GC`
 commit), which a branch and a tag sharing a name would answer differently. The
 header records it as `modelith-ref-type`, so a later `deps check` or `deps
-update` asks for the same typed version the import did rather than letting the
-API infer one. An unprefixed URL, or a `--ref` override, records `auto`, which
-is what leaves the inference to the API. GitHub has no such key: its API
-resolves an untyped ref on its own.
+update` asks for the same typed version the import did. There is no "let the API
+decide": Azure DevOps reads an untyped request as a *branch*, so a copy pinned
+to a tag or a commit would 404. When the type is not named — a bare `version=`,
+a `--ref` override, or a header written before the key existed — modelith
+resolves it before fetching: a git object id is a commit, and anything else is
+looked up among the repository's branches and then its tags. GitHub has no such
+key: its API resolves an untyped ref on its own.
 
 :::
 
