@@ -11,12 +11,20 @@ another one defines — but only across files that are already in your
 repository. **Vendoring** is how a model from *somewhere else* gets there: you
 fetch a copy, commit it, and modelith records where it came from.
 
+Authenticate with the CLI for the host before your first import:
+
 ```sh
-modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml docs/
+gh auth login # GitHub
+az login      # Azure DevOps
 ```
 
-That URL is the address of the file as it appears in your browser on
-github.com — open the model on GitHub and copy the address bar.
+Then copy the model's browser URL and import it. GitHub and Azure DevOps use
+slightly different URL shapes:
+
+```sh
+modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml docs/
+modelith deps import "https://dev.azure.com/acme/billing/_git/models?path=docs/payments.modelith.yaml&version=GBmain" docs/
+```
 
 ## What you get
 
@@ -195,15 +203,11 @@ that matched none of your copies does not read as good news. To find them:
 git grep -l '# modelith-vendored'
 ```
 
-:::note[Refresh reaches github.com only, for now]
+:::note[Refresh reaches GitHub only]
 
-`deps check` and `deps update` fetch through `gh`, which speaks only GitHub, so a
-copy vendored from Azure DevOps cannot be refreshed by this version. Both
-commands report it against the copy's own line — naming the host and the
-remedy — rather than trying and failing obscurely. To take a newer version of an
-ADO copy in the meantime, import it again; that overwrites the copy with the
-origin's current file. If you need refresh for another host, please
-[open an issue](https://github.com/stacklok/modelith/issues).
+`deps check` and `deps update` use `gh`, so they cannot refresh a copy imported
+from Azure DevOps. To take a newer version, import the file again from its
+Azure DevOps browser URL. The import replaces the existing copy.
 
 :::
 
@@ -283,25 +287,14 @@ already solves.
 
 ## Requirements and limits
 
-- **`gh` or `az` must be installed and authenticated.** modelith implements no
-  network transport of its own; it delegates to the [GitHub
-  CLI](https://cli.github.com) or the [Azure
-  CLI](https://learn.microsoft.com/en-us/cli/azure/), which already solve
-  authentication for private and internal repositories.
-- **Both github.com and dev.azure.com are supported.** The URL is the address of
-  the file as it appears in a browser. For Azure DevOps that means a `_git` URL
-  with `?path=...&version=GB<branch>` — open the file on dev.azure.com and copy
-  the address bar, exactly as for GitHub. If you need another host, please
-  [open an issue](https://github.com/stacklok/modelith/issues). That is not a
-  brush-off: the header records *how* it was fetched, so adding another
-  transport is straightforward — what is missing is a real user to build it
-  for, and an issue is how you become one.
-- **`deps check` and `deps update` are github.com only, for now.** They reach the
-  origin through `gh`, so an Azure DevOps copy can be imported and linted but
-  not refreshed; re-import it to take a newer version. Both commands say so in
-  the copy's own line rather than failing obscurely, and refresh for another
-  host is follow-up work — [open an
-  issue](https://github.com/stacklok/modelith/issues) if you need it.
+- **Install the CLI for the host you import from.** For GitHub, install and
+  authenticate the [GitHub CLI](https://cli.github.com). For Azure DevOps,
+  install the [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/) and run
+  `az login`. modelith delegates authentication to these tools.
+- **Import from github.com or dev.azure.com.** An Azure DevOps URL has the form
+  `https://dev.azure.com/<ORGANIZATION>/<PROJECT>/_git/<REPOSITORY>?path=<PATH>&version=GB<BRANCH>`.
+  To request another host, [open an
+  issue](https://github.com/stacklok/modelith/issues).
 - **`lint` and `render` never touch the network**, whatever you pass them
   ([ADR-0011](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0011-network-boundary.md)).
   Everything under `modelith deps` is opt-in, and nothing else fetches.

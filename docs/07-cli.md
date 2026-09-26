@@ -99,34 +99,39 @@ semantics, and refresh behavior.
 
 ### `modelith deps import <url> [dir]`
 
-Fetches a GitHub model and writes a vendored copy to `dir`, or the working
-directory when omitted. The filename comes from the origin. It requires an
-installed, authenticated [`gh`](https://cli.github.com) CLI and prints the
-`imports:` entry to add; it does not edit your model.
+Fetches a GitHub or Azure DevOps model and writes a vendored copy to `dir`, or
+the working directory when omitted. The filename comes from the origin. GitHub
+imports require an installed, authenticated [`gh`](https://cli.github.com) CLI.
+Azure DevOps imports require the [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/)
+and an `az login` session. The command prints the `imports:` entry to add; it
+does not edit your model.
 
 | Argument / flag | Meaning |
 |---|---|
-| `<url>` | The address of the file as it appears in a browser on github.com. |
+| `<url>` | The browser URL of a file on github.com or dev.azure.com. |
 | `[dir]` | Destination directory. |
 | `--ref` | Ref to fetch, overriding the ref in the URL. A tag pins the copy. |
+| `--timeout` | Maximum duration for each delegated `gh` or `az` fetch. Defaults to `60s`; `0` disables the limit. |
 
-When a branch or tag contains `/`, pass `--ref` only when it names that same ref in
-the URL: it tells modelith where the ref ends and the file path begins. For
-example, use `--ref release/v2` with a URL containing
-`/blob/release/v2/docs/payments.modelith.yaml`. For an ordinary single-segment
-ref in the URL, a different `--ref` works. But `--ref` cannot both select a
-different ref and disambiguate a URL whose ref itself contains `/`; in that
-ambiguous case, copy the browser URL for the file at the target ref.
+GitHub browser URLs can be ambiguous when a branch or tag contains `/`. Pass
+`--ref` only when it names that same ref in the URL: it tells modelith where the
+ref ends and the file path begins. For example, use `--ref release/v2` with a
+URL containing `/blob/release/v2/docs/payments.modelith.yaml`. For an ordinary
+single-segment ref in the URL, a different `--ref` works. But `--ref` cannot
+both select a different ref and disambiguate a URL whose ref contains `/`; in
+that case, copy the browser URL for the file at the target ref.
 
 ```sh
 modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml docs/
+modelith deps import "https://dev.azure.com/acme/billing/_git/models?path=docs/payments.modelith.yaml&version=GBmain" docs/
 ```
 
 ### `modelith deps check <file>...`
 
-Checks vendored copies against their origins and exits non-zero when a copy is
-stale or cannot be reached. It writes nothing and skips files without provenance
-headers.
+Checks GitHub-origin vendored copies against their origins and exits non-zero
+when a copy is stale or cannot be reached. It writes nothing and skips files
+without provenance headers. This version cannot refresh Azure DevOps copies;
+import the file again from its browser URL to replace one.
 
 ```sh
 modelith deps check docs/*.modelith.yaml
@@ -134,9 +139,9 @@ modelith deps check docs/*.modelith.yaml
 
 ### `modelith deps update [--ref <ref>] <file>...`
 
-Updates vendored copies from their origins. `--ref` re-pins one copy to a tag or
-branch; it accepts exactly one file. The command does not edit `imports:` or
-lint the result.
+Updates GitHub-origin vendored copies from their origins. `--ref` re-pins one
+copy to a tag or branch; it accepts exactly one file. The command does not edit
+`imports:` or lint the result. Import an Azure DevOps copy again to replace it.
 
 ```sh
 modelith deps update docs/*.modelith.yaml
