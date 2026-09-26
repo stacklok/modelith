@@ -182,12 +182,11 @@ canonical. Content is therefore written to a temp file with `--output-file` and
 read back, so the vendored bytes match the origin by construction rather than by
 trusting a printer. `gh` needs no such step; it returns the raw body unchanged.
 
-**The header keeps its shape.** `fetch: git` still names what the origin *is*,
-and the recorded `origin` is the repository URL
-(`https://dev.azure.com/<org>/<project>/_git/<repo>`), so no header migration is
-needed and an ADO copy is verified offline against its digest exactly like a
-GitHub one. A legacy `*.visualstudio.com` URL is refused at parse time with a
-pointer to the `dev.azure.com` address, since the host moved.
+**`fetch: git` still names what the origin is.** The recorded `origin` is the
+repository URL (`https://dev.azure.com/<org>/<project>/_git/<repo>`), so an ADO
+copy is verified offline against its digest exactly like a GitHub one, and a
+legacy `*.visualstudio.com` URL is refused at parse time with a pointer to the
+`dev.azure.com` address, since the host moved.
 
 **Process lifecycle is bounded.** A delegated command that spawns helpers
 inheriting its pipes can hold `Wait()` open past a context deadline. On Unix the
@@ -199,29 +198,49 @@ command its own deadline, and the resulting message distinguishes a fired
 deadline from a caller's cancel (e.g. Ctrl+C) rather than reporting both as a
 timeout.
 
-**Scope: import today, refresh later.** This amendment covers `deps import`.
-`deps check` and `deps update` reach the origin through `gh` and rebuild a
-GitHub-shaped address from the header, so a copy vendored from Azure DevOps
-cannot yet be refreshed; such a copy is refused up front, with an error naming
-the host and the remedy, rather than failing as a malformed URL. Extending
-refresh to a second host means rebuilding an ADO address from what a header
-records — which does not include the ADO `project` or the `version=` prefix —
-so it is recorded here as follow-up work, not as a claim this amendment makes.
+**The Items API is asked for bytes.** The content fetch passes `download=true`.
+Without it the endpoint returns a JSON `GitItem` describing the item rather than
+its content, which the model parser then rejects; with it the body is the file,
+and `--output-file` writes those bytes verbatim.
+
+**The header gains one optional key, `ref-type`.** An Azure DevOps version has a
+*type* — `GB` a branch, `GT` a tag, `GC` a commit — and `az`'s API takes the type
+alongside the value. Letting the API infer it is not equivalent: a branch and a
+tag may share a name, and the two answer differently. So an ADO import records
+`# modelith-ref-type:` as `branch`, `tag`, or `commit`, or `auto` when the URL
+left the type unprefixed or `--ref` overrode it — the case where inference is
+what was asked for. The key is optional and *omitted* for GitHub, whose API
+resolves an untyped ref on its own: a header written before the key existed
+still parses, and no GitHub header changes shape.
+
+**Refresh is first-class for both hosts.** `deps check` and `deps update`
+dispatch on the origin's host. A `github.com` origin is rebuilt into a blob URL
+as before; a `dev.azure.com` origin is rebuilt into the typed ADO address, using
+the `origin` (organization, project, repository), `path`, `ref`, and the new
+`ref-type`. The content and commit fetchers dispatch the same way, so a copy from
+either host is checked and updated rather than only imported. A copy from a host
+this build has no transport for is still refused per file — as a `Report`, so a
+run that also holds reachable copies still judges them — with an error naming the
+origin rather than failing as a malformed URL.
 
 Pinned by `TestImport_ADO_StampsAVerifiableCopy` and the rest of the
-`TestImport_ADO_*` set (import end to end, the ref-type prefixes, and the
-`--ref` override), `TestExecRunner_KillsTheWholeProcessGroup` and
+`TestImport_ADO_*` set (import end to end, the ref-type prefixes, the `--ref`
+override, and `download=true` on the items request),
+`TestRefresh_ADOCopyIsFirstClass` (check and update dispatch to `az rest` and
+keep the recorded ref type), `TestRefresh_RefusesAnUnknownHost` (a host with no
+transport), `TestExecRunner_KillsTheWholeProcessGroup` and
 `TestExecRunner_WaitDelayBoundsAPipeHeldByAStrayChild` (the process lifecycle),
-the `TestTimeoutRunner_*` set (the deadline message), and
-`TestRefresh_RefusesAnOriginItCannotReach` (the refresh scope limit).
+and the `TestTimeoutRunner_*` set (the deadline message).
 
 ### Amendment consequences
 
-- `deps import` accepts `github.com` and `dev.azure.com` URLs.
+- `deps import`, `deps check`, and `deps update` accept `github.com` and
+  `dev.azure.com` origins.
 - `az` is a runtime prerequisite for Azure DevOps origins, the way `gh` is for
   GitHub; the "not installed" hint names the right CLI for the one that is
   missing.
 - Offline `lint` verifies an Azure DevOps copy against its digest identically to
   a GitHub one.
-- `deps check` and `deps update` remain `github.com`-only and refuse an Azure
-  DevOps copy with an actionable error.
+- A header for a non-GitHub origin carries `modelith-ref-type:`, and one for
+  GitHub does not — so a GitHub header written by an earlier release is
+  byte-identical to one written now.

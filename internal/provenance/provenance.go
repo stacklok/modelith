@@ -43,14 +43,23 @@ type Header struct {
 	Origin   string
 	Path     string
 	Ref      string
+	// RefType is the kind of ref Ref names, for a host whose API distinguishes
+	// them: "branch", "tag", or "commit", or "auto" when the origin's own API is
+	// left to infer it. It is optional and omitted for a host, such as GitHub,
+	// whose API resolves an untyped ref on its own — so a header written before
+	// this key existed still parses, and a GitHub header keeps its shape.
+	RefType  string
 	Commit   string
 	Imported string
 	Digest   string
 }
 
+// refTypes is the closed set a ref-type value may name.
+var refTypes = []string{"branch", "tag", "commit", "auto"}
+
 // keyOrder is the order Format writes the keys in, and the set of keys that
 // exist at all: a line naming anything else is a Problem.
-var keyOrder = []string{"vendored", "fetch", "origin", "path", "ref", "commit", "imported", "digest"}
+var keyOrder = []string{"vendored", "fetch", "origin", "path", "ref", "ref-type", "commit", "imported", "digest"}
 
 // commonKeys are required whatever the fetch method is. methodKeys are the ones
 // each method requires on top, so adding a method means declaring what it
@@ -86,6 +95,8 @@ func (h *Header) field(key string) *string {
 		return &h.Path
 	case "ref":
 		return &h.Ref
+	case "ref-type":
+		return &h.RefType
 	case "commit":
 		return &h.Commit
 	case "imported":
@@ -203,6 +214,10 @@ func (h *Header) validate(seen map[string]int) []Problem {
 	if h.Digest != "" && !digestRE.MatchString(h.Digest) {
 		problems = append(problems, Problem{seen["digest"], fmt.Sprintf(
 			"provenance digest %q is not in the form sha256:<64 hex digits>", h.Digest)})
+	}
+	if h.RefType != "" && !slices.Contains(refTypes, h.RefType) {
+		problems = append(problems, Problem{seen["ref-type"], fmt.Sprintf(
+			"provenance ref-type %q is not one of %s", h.RefType, quotedList(refTypes))})
 	}
 	return problems
 }

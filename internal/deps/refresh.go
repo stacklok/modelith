@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -214,7 +215,7 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 		return rep, nil
 	}
 
-	upstream, err := fetchContent(ctx, runner, src)
+	upstream, err := fetchContentFor(ctx, runner, src)
 	if err != nil {
 		if errors.Is(err, ErrToolUnavailable) {
 			return rep, err
@@ -235,7 +236,7 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 		// The commit is reporting, not verdict: resolve it only when the origin
 		// actually moved, so a clean check costs one call per copy (ADR-0016).
 		if st.Moved() {
-			commit, err := fetchCommit(ctx, runner, src)
+			commit, err := fetchCommitFor(ctx, runner, src)
 			if err != nil {
 				// Not rep.Err: this copy was reached and measured, and the
 				// verdict that measurement produced is what check exists to
@@ -275,7 +276,7 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 	}
 
 	// A refresh: a new version, a new pin, or both.
-	commit, err := fetchCommit(ctx, runner, src)
+	commit, err := fetchCommitFor(ctx, runner, src)
 	if err != nil {
 		if errors.Is(err, ErrToolUnavailable) {
 			return rep, err
@@ -306,12 +307,14 @@ func write(path string, content []byte, h *provenance.Header) error {
 
 // sourceFromHeader rebuilds the fetch address from what a header records.
 //
-// It reassembles the blob URL and hands it back to ParseSource rather than
-// picking the origin apart here, so a hand-written header gets the same
-// treatment a typed one does: the host check, and the dot-segment rejection
-// that escapePath depends on to keep an endpoint inside the repository's
-// contents namespace. Passing ref explicitly is what lets a ref containing a
-// slash split correctly, which is knowable here and is not from a URL alone.
+// The host decides the shape: a github.com origin is reassembled into a blob URL
+// and handed back to ParseSource, and a dev.azure.com origin into the typed ADO
+// address adoSourceFromHeader builds. Going through ParseSource rather than
+// picking the origin apart here means a hand-written header gets the same
+// treatment a typed one does: the host check, and the dot-segment rejection that
+// escapePath depends on to keep an endpoint inside the repository's contents
+// namespace. Passing ref explicitly is what lets a ref containing a slash split
+// correctly, which is knowable here and is not from a URL alone.
 //
 // The ref and path go back in escaped. What a header records is what ParseSource
 // decoded out of a URL, so handing them over raw would ask url.Parse to read a
@@ -326,19 +329,51 @@ func sourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 			"modelith cannot refresh a copy fetched with %q — this build knows how to fetch %s",
 			h.Fetch, strings.Join(provenance.Methods(), ", "))
 	}
-	// A copy vendored from another host cannot be refreshed by this build: check
-	// and update both reach the origin through gh, which speaks only GitHub, and
-	// the address rebuilt below is a GitHub shape ("/<origin>/blob/<ref>/<path>").
-	// Refusing here, where the address is assembled, keeps the error about the
-	// gap rather than about a URL the user never wrote — the GitHub-shaped URL
-	// handed to ParseSource would instead fail as an ADO URL missing its ?path=
-	// query, which reads as a mistake in the header.
-	if host := originHost(h.Origin); host != "" && host != "github.com" {
+	switch originHost(h.Origin) {
+	case "github.com":
+		return ParseSource(fmt.Sprintf("%s/blob/%s/%s", normOrigin(h.Origin), escapePath(ref), escapePath(h.Path)), ref)
+	case "dev.azure.com":
+		return adoSourceFromHeader(h, ref)
+	default:
 		return Source{}, fmt.Errorf(
-			"cannot be refreshed: it was vendored from %s, and deps check and deps update fetch through gh, which speaks only GitHub. To take a newer version, import it again from its origin (`modelith deps import <the file's address>`) — that overwrites this copy with the origin's current file. Refresh for hosts other than github.com is not written yet; if you need it, please open an issue at %s",
-			host, issuesURL)
+			"cannot be refreshed: it was vendored from %q, and deps check and deps update reach github.com and dev.azure.com origins only. To take a newer version, import it again from its origin (`modelith deps import <the file's address>`) — that overwrites this copy with the origin's current file. If you need refresh for another host, please open an issue at %s",
+			h.Origin, issuesURL)
 	}
-	return ParseSource(fmt.Sprintf("%s/blob/%s/%s", normOrigin(h.Origin), escapePath(ref), escapePath(h.Path)), ref)
+}
+
+// adoSourceFromHeader rebuilds an Azure DevOps fetch address from what a header
+// records. The origin carries the organization, project, and repository; path
+// and ref name the item and version; and ref-type — recorded at import — names
+// the kind of ref, so a refresh asks for the same typed version the import did
+// rather than letting the API infer one, which a branch and a tag sharing a name
+// would answer differently.
+func adoSourceFromHeader(h *provenance.Header, ref string) (Source, error) {
+	u, err := url.Parse(normOrigin(h.Origin))
+	if err != nil {
+		return Source{}, fmt.Errorf("%q is not a URL: %w", h.Origin, err)
+	}
+	q := url.Values{}
+	q.Set("path", h.Path)
+	q.Set("version", adoVersionPrefix(h.RefType)+ref)
+	u.RawQuery = q.Encode()
+	// The ref type rides in the version prefix, so ParseSource is not asked to
+	// override the ref: an override would reset the type to auto-detect, which
+	// would discard what the header recorded.
+	return ParseSource(u.String(), "")
+}
+
+// adoVersionPrefix maps a recorded ref-type to the URL's version prefix, and an
+// empty or "auto" type to none — which is what leaves the ADO API to infer it.
+func adoVersionPrefix(refType string) string {
+	switch refType {
+	case "branch":
+		return "GB"
+	case "tag":
+		return "GT"
+	case "commit":
+		return "GC"
+	}
+	return ""
 }
 
 // checkFetched applies to a refetch the same two refusals import applies to a

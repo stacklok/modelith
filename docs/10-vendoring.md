@@ -51,6 +51,7 @@ never has one, and never meets any of this.
 | `vendored` | That this file is a copy. Nothing enforces it; it is there so a person or an agent about to edit the file stops. |
 | `fetch` | How to get it again. `git` today. |
 | `origin`, `path`, `ref` | Where it came from and what to track. A tag in `ref` pins the copy; a branch follows it. |
+| `ref-type` | Azure DevOps only: the kind of ref `ref` names — `branch`, `tag`, `commit`, or `auto` — so a refresh rebuilds the same typed request. Omitted for GitHub, whose API resolves an untyped ref. |
 | `commit` | The commit that last touched *this file* at that ref — so it does not move when unrelated commits land. |
 | `imported` | When you fetched it. |
 | `digest` | SHA-256 of the file with the header lines removed, so stamping the header does not change it. |
@@ -203,11 +204,15 @@ that matched none of your copies does not read as good news. To find them:
 git grep -l '# modelith-vendored'
 ```
 
-:::note[Refresh reaches GitHub only]
+:::note[Azure DevOps copies record how pinned they are]
 
-`deps check` and `deps update` use `gh`, so they cannot refresh a copy imported
-from Azure DevOps. To take a newer version, import the file again from its
-Azure DevOps browser URL. The import replaces the existing copy.
+An Azure DevOps URL carries a version *type* (`GB` branch, `GT` tag, `GC`
+commit), which a branch and a tag sharing a name would answer differently. The
+header records it as `modelith-ref-type`, so a later `deps check` or `deps
+update` asks for the same typed version the import did rather than letting the
+API infer one. An unprefixed URL, or a `--ref` override, records `auto`, which
+is what leaves the inference to the API. GitHub has no such key: its API
+resolves an untyped ref on its own.
 
 :::
 
@@ -291,7 +296,8 @@ already solves.
   authenticate the [GitHub CLI](https://cli.github.com). For Azure DevOps,
   install the [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/) and run
   `az login`. modelith delegates authentication to these tools.
-- **Import from github.com or dev.azure.com.** An Azure DevOps URL has the form
+- **Import and refresh from github.com or dev.azure.com.** An Azure DevOps URL
+  has the form
   `https://dev.azure.com/<ORGANIZATION>/<PROJECT>/_git/<REPOSITORY>?path=<PATH>&version=GB<BRANCH>`.
   To request another host, [open an
   issue](https://github.com/stacklok/modelith/issues).

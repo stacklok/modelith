@@ -128,10 +128,9 @@ modelith deps import "https://dev.azure.com/acme/billing/_git/models?path=docs/p
 
 ### `modelith deps check <file>...`
 
-Checks GitHub-origin vendored copies against their origins and exits non-zero
-when a copy is stale or cannot be reached. It writes nothing and skips files
-without provenance headers. This version cannot refresh Azure DevOps copies;
-import the file again from its browser URL to replace one.
+Checks vendored copies against their origins and exits non-zero when a copy is
+stale or cannot be reached. It writes nothing and skips files without provenance
+headers. Copies from github.com and dev.azure.com are both checked.
 
 ```sh
 modelith deps check docs/*.modelith.yaml
@@ -139,9 +138,9 @@ modelith deps check docs/*.modelith.yaml
 
 ### `modelith deps update [--ref <ref>] <file>...`
 
-Updates GitHub-origin vendored copies from their origins. `--ref` re-pins one
-copy to a tag or branch; it accepts exactly one file. The command does not edit
-`imports:` or lint the result. Import an Azure DevOps copy again to replace it.
+Updates vendored copies from their origins, for copies from github.com and
+dev.azure.com alike. `--ref` re-pins one copy to a tag or branch; it accepts
+exactly one file. The command does not edit `imports:` or lint the result.
 
 ```sh
 modelith deps update docs/*.modelith.yaml

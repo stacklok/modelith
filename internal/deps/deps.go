@@ -346,29 +346,16 @@ func Import(ctx context.Context, opts Options) (*Result, error) {
 		runner = timeoutRunner{inner: runner, timeout: opts.Timeout}
 	}
 
-	var content []byte
-	var commit string
-
-	if src.Host == HostADO {
-		// ADO fetch delegates to the az CLI.
-		content, err = fetchContentADO(ctx, runner, src)
-		if err != nil {
-			return nil, fmt.Errorf("fetching content: %w%s", err, splitHint(src, err))
-		}
-		commit, err = fetchCommitADO(ctx, runner, src)
-		if err != nil {
-			return nil, fmt.Errorf("fetching commit: %w", err)
-		}
-	} else {
-		// GitHub fetch delegates to the gh CLI.
-		content, err = fetchContent(ctx, runner, src)
-		if err != nil {
-			return nil, fmt.Errorf("fetching content: %w%s", err, splitHint(src, err))
-		}
-		commit, err = fetchCommit(ctx, runner, src)
-		if err != nil {
-			return nil, fmt.Errorf("fetching commit: %w", err)
-		}
+	// One dispatch, not two: the transport is chosen from the source's host, so
+	// adding a host does not mean threading a branch through here (and the
+	// refresh path uses the same pair).
+	content, err := fetchContentFor(ctx, runner, src)
+	if err != nil {
+		return nil, fmt.Errorf("fetching content: %w%s", err, splitHint(src, err))
+	}
+	commit, err := fetchCommitFor(ctx, runner, src)
+	if err != nil {
+		return nil, fmt.Errorf("fetching commit: %w", err)
 	}
 
 	if provenance.Present(content) {
@@ -396,6 +383,7 @@ func Import(ctx context.Context, opts Options) (*Result, error) {
 		Origin:   src.Origin,
 		Path:     src.Path,
 		Ref:      src.Ref,
+		RefType:  recordedRefType(src),
 		Commit:   commit,
 		Imported: opts.Now.Format("2006-01-02"),
 		Digest:   provenance.Digest(content),
@@ -493,6 +481,41 @@ func isNotFound(err error) bool {
 	return strings.Contains(msg, "404") || strings.Contains(msg, "Not Found")
 }
 
+// fetchContentFor fetches the file's bytes through the transport its host uses:
+// the gh CLI for GitHub, the az CLI for Azure DevOps.
+func fetchContentFor(ctx context.Context, runner Runner, src Source) ([]byte, error) {
+	if src.Host == HostADO {
+		return fetchContentADO(ctx, runner, src)
+	}
+	return fetchContent(ctx, runner, src)
+}
+
+// fetchCommitFor resolves the commit that last touched the file, through the
+// transport its host uses.
+func fetchCommitFor(ctx context.Context, runner Runner, src Source) (string, error) {
+	if src.Host == HostADO {
+		return fetchCommitADO(ctx, runner, src)
+	}
+	return fetchCommit(ctx, runner, src)
+}
+
+// recordedRefType is the ref-type a provenance header records for src: the ADO
+// version type when the URL's GB/GT/GC prefix named one, "auto" when the ADO
+// API is left to infer it (an unprefixed version=, or a --ref override), and
+// empty for GitHub — whose API resolves an untyped ref on its own, and whose
+// headers predate this key. Recording it is what lets a later refresh rebuild
+// the same typed request, which is not equivalent to auto-detection when a
+// branch and a tag share a name.
+func recordedRefType(src Source) string {
+	if src.Host != HostADO {
+		return ""
+	}
+	if vt := adoVersionType(src); vt != "" {
+		return vt
+	}
+	return "auto"
+}
+
 // fetchContent returns the file's bytes. The raw media type asks the API for
 // the content itself rather than a JSON envelope carrying it base64-encoded, so
 // nothing here has to decode.
@@ -588,15 +611,19 @@ func adoVersionType(src Source) string {
 // fetchContentADO fetches the file content from Azure DevOps by delegating to
 // `az rest`. Auth is handled by the az CLI.
 //
-// The body is written to a temporary file with --output-file and read back
-// rather than taken from stdout: az rest appends a newline when it prints a
-// raw body to stdout, so the stdout form is not byte-identical to the origin
-// file — it drifts a trailing newline into the vendored copy and its digest
-// (the ADR-0015 amendment on the Azure DevOps transport). The --output-file form
-// is the exact API response body.
+// download=true is what makes the response the file's bytes. The Items API
+// defaults it to false, in which case the body is a JSON GitItem describing the
+// item — metadata the model parser would then reject. With it, the body is the
+// raw content and --output-file writes those bytes verbatim.
+//
+// The body is written to a temporary file with --output-file rather than taken
+// from stdout: az rest appends a newline when it prints a body to stdout, so the
+// stdout form is not byte-identical to the origin file — it drifts a trailing
+// newline into the vendored copy and its digest (the ADR-0015 amendment on the
+// Azure DevOps transport).
 func fetchContentADO(ctx context.Context, runner Runner, src Source) ([]byte, error) {
 	uri := fmt.Sprintf(
-		"https://dev.azure.com/%s/%s/_apis/git/repositories/%s/items?path=%s&versionDescriptor.version=%s&api-version=7.1",
+		"https://dev.azure.com/%s/%s/_apis/git/repositories/%s/items?path=%s&versionDescriptor.version=%s&download=true&api-version=7.1",
 		url.PathEscape(src.Owner), url.PathEscape(src.Project),
 		url.PathEscape(src.Repo), url.QueryEscape(src.Path),
 		url.QueryEscape(src.Ref))

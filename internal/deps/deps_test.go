@@ -92,7 +92,7 @@ func (f *fakeRunner) runAz(args []string) ([]byte, error) {
 			}
 		}
 		// The real fetch writes the body to --output-file (az rest appends a
-		// newline when printing a raw body to stdout, which would drift the
+		// newline when printing a body to stdout, which would drift the
 		// vendored copy — see fetchContentADO). The fake must mirror that
 		// contract, so a test cannot pass while asserting an argv the real
 		// command would not produce.
@@ -105,10 +105,18 @@ func (f *fakeRunner) runAz(args []string) ([]byte, error) {
 		if outPath == "" {
 			return nil, fmt.Errorf("az: content fetch must use --output-file, got %q", args)
 		}
-		if err := os.WriteFile(outPath, []byte(f.content), 0o644); err != nil {
+		// The Items API returns the file's bytes only with download=true;
+		// without it the body is a JSON GitItem, which the model parser then
+		// rejects. Mirroring that here turns the omission into a test failure
+		// rather than a surprise against a real endpoint.
+		body := []byte(f.content)
+		if !strings.Contains(uri, "download=true") {
+			body = []byte(`{"objectId":"` + f.sha + `","gitObjectType":"blob","path":"/payments.modelith.yaml"}`)
+		}
+		if err := os.WriteFile(outPath, body, 0o644); err != nil {
 			return nil, err
 		}
-		return []byte(f.content), nil
+		return body, nil
 	case strings.Contains(uri, "/commits"):
 		// The commit endpoint must not shell-escape $top.
 		if strings.Contains(uri, "\\$top") {
@@ -952,6 +960,7 @@ func TestImport_ADO_StampsAVerifiableCopy(t *testing.T) {
 		Origin:   "https://dev.azure.com/myorg/myproject/_git/myrepo",
 		Path:     "docs/payments.modelith.yaml",
 		Ref:      "main",
+		RefType:  "branch",
 		Commit:   adoCommit,
 		Imported: "2026-07-27",
 		Digest:   provenance.Digest([]byte(adoContent)),
@@ -992,6 +1001,11 @@ func TestImport_ADO_CallsAzWithTheExpectedEndpoints(t *testing.T) {
 				uri := call[i+1]
 				if strings.Contains(uri, "/items") {
 					foundContent++
+					// Without download=true the Items API returns a JSON
+					// GitItem, and the import cannot parse the model out of it.
+					if !strings.Contains(uri, "download=true") {
+						t.Errorf("the items request omits download=true, so the API returns JSON metadata rather than the model: %s", uri)
+					}
 				}
 				if strings.Contains(uri, "/commits") {
 					foundCommit++

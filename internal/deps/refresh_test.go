@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -99,13 +100,109 @@ func vendoredFromADO(t *testing.T) string {
 	return res.Path
 }
 
-// TestRefresh_RefusesAnOriginItCannotReach pins the ADO refresh limit: deps
-// check and deps update reach the origin through gh, which speaks only GitHub,
-// so a copy vendored from Azure DevOps cannot be refreshed. The refusal has to
-// be a per-file Report that names the host and points at the remedy, has to
-// measure nothing and write nothing, and must not call out at all — the origin
-// is on a host this build has no transport for.
-func TestRefresh_RefusesAnOriginItCannotReach(t *testing.T) {
+// TestRefresh_ADOCopyIsFirstClass pins that a copy vendored from Azure DevOps is
+// checked and updated like a GitHub one. The header records the ref type, so
+// refresh rebuilds the same typed request the import made — which is not
+// equivalent to auto-detection when a branch and a tag share a name.
+func TestRefresh_ADOCopyIsFirstClass(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an unmoved origin is up to date", func(t *testing.T) {
+		t.Parallel()
+		path := vendoredFromADO(t)
+		rep := check(t, adoRunner(adoContent, adoCommit), path)[0]
+		if rep.Err != nil {
+			t.Fatalf("unexpected error: %v", rep.Err)
+		}
+		if rep.Stale() {
+			t.Error("reported stale against an origin serving the same bytes")
+		}
+		if rep.State.Ref != "main" {
+			t.Errorf("checked against ref %q, want the header's %q", rep.State.Ref, "main")
+		}
+	})
+
+	t.Run("a moved origin is stale and names the new commit", func(t *testing.T) {
+		t.Parallel()
+		path := vendoredFromADO(t)
+		rep := check(t, adoRunner(moved, laterSHA), path)[0]
+		if !rep.Stale() {
+			t.Fatal("reported up to date against an origin serving different bytes")
+		}
+		if rep.Commit != laterSHA {
+			t.Errorf("Commit = %q, want the origin's %q", rep.Commit, laterSHA)
+		}
+	})
+
+	t.Run("update brings the copy forward and keeps the ref type", func(t *testing.T) {
+		t.Parallel()
+		path := vendoredFromADO(t)
+		rep := update(t, adoRunner(moved, laterSHA), "", path)[0]
+		if !rep.Written {
+			t.Fatalf("update did not write the copy: %v", rep.Err)
+		}
+		after := readFile(t, path)
+		for _, want := range []string{
+			"# modelith-ref-type: branch",
+			"# modelith-ref: main",
+			"# modelith-commit: " + laterSHA,
+		} {
+			if !strings.Contains(after, want) {
+				t.Errorf("the refreshed copy does not contain %q:\n%s", want, after)
+			}
+		}
+	})
+
+	t.Run("the request is typed from the header, not auto-detected", func(t *testing.T) {
+		t.Parallel()
+		path := vendoredFromADO(t)
+		r := adoRunner(adoContent, adoCommit)
+		check(t, r, path)
+		if len(r.calls) == 0 {
+			t.Fatal("the check made no az call")
+		}
+		if uri := azURI(r.calls[0]); !strings.Contains(uri, "versionDescriptor.versionType=branch") {
+			t.Errorf("refresh did not rebuild the typed request: %s", uri)
+		}
+	})
+}
+
+// azURI returns the --uri argument of an az rest call, or "" if there is none.
+func azURI(call []string) string {
+	for i, a := range call {
+		if a == "--uri" && i+1 < len(call) {
+			return call[i+1]
+		}
+	}
+	return ""
+}
+
+// vendoredOnHost writes a copy whose header names an arbitrary origin, so a test
+// can exercise the refresh dispatch for a host this build has no transport for.
+func vendoredOnHost(t *testing.T, origin, path, ref string) string {
+	t.Helper()
+	content := []byte(upstream)
+	h := &provenance.Header{
+		Vendored: provenance.Banner,
+		Fetch:    "git",
+		Origin:   origin,
+		Path:     path,
+		Ref:      ref,
+		Commit:   sha,
+		Imported: "2026-07-27",
+		Digest:   provenance.Digest(content),
+	}
+	file := filepath.Join(t.TempDir(), "payments.modelith.yaml")
+	if err := os.WriteFile(file, provenance.Stamp(content, h), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+// TestRefresh_RefusesAnUnknownHost pins that a copy from a host this build has no
+// transport for is refused per file — naming the origin and the remedy — rather
+// than being misread as a GitHub address and failing on something unrelated.
+func TestRefresh_RefusesAnUnknownHost(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
@@ -121,7 +218,7 @@ func TestRefresh_RefusesAnOriginItCannotReach(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			path := vendoredFromADO(t)
+			path := vendoredOnHost(t, "https://gitlab.com/acme/billing", "docs/payments.modelith.yaml", "main")
 			before := readFile(t, path)
 
 			// A runner that would answer, and answer "moved", were the refusal
@@ -131,9 +228,9 @@ func TestRefresh_RefusesAnOriginItCannotReach(t *testing.T) {
 			rep := tc.run(t, r, path)
 
 			if rep.Err == nil {
-				t.Fatal("an ADO copy was refreshed without an error")
+				t.Fatal("a copy on an unreachable host was refreshed without an error")
 			}
-			for _, want := range []string{"dev.azure.com", "gh", issuesURL} {
+			for _, want := range []string{"gitlab.com", issuesURL} {
 				if !strings.Contains(rep.Err.Error(), want) {
 					t.Errorf("the refusal does not mention %q:\n%v", want, rep.Err)
 				}
@@ -151,22 +248,21 @@ func TestRefresh_RefusesAnOriginItCannotReach(t *testing.T) {
 	}
 }
 
-// TestRefresh_ADORefusalDoesNotStopTheRun pins that the refusal above is a
-// per-file Report and not a batch abort: a repository holding both an ADO copy
-// and a GitHub one still gets a verdict on the GitHub copy, which is the whole
-// reason the gap is reported per file rather than raised as a run error.
-func TestRefresh_ADORefusalDoesNotStopTheRun(t *testing.T) {
+// TestRefresh_AnUnknownHostDoesNotStopTheRun pins that the refusal above is a
+// per-file Report and not a batch abort: a repository holding both an
+// unknown-host copy and a GitHub one still gets a verdict on the GitHub copy.
+func TestRefresh_AnUnknownHostDoesNotStopTheRun(t *testing.T) {
 	t.Parallel()
 
 	ghPath, r := vendored(t, upstream)
-	adoPath := vendoredFromADO(t)
+	otherPath := vendoredOnHost(t, "https://gitlab.com/acme/billing", "docs/payments.modelith.yaml", "main")
 
-	reports := check(t, r, adoPath, ghPath)
+	reports := check(t, r, otherPath, ghPath)
 	if len(reports) != 2 {
 		t.Fatalf("got %d reports, want one per file", len(reports))
 	}
 	if reports[0].Err == nil {
-		t.Error("the ADO copy was not refused")
+		t.Error("the unknown-host copy was not refused")
 	}
 	if got := reports[1]; got.Err != nil {
 		t.Errorf("the GitHub copy was not judged: %v", got.Err)
