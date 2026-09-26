@@ -11,12 +11,20 @@ another one defines — but only across files that are already in your
 repository. **Vendoring** is how a model from *somewhere else* gets there: you
 fetch a copy, commit it, and modelith records where it came from.
 
+Authenticate with the CLI for the host before your first import:
+
 ```sh
-modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml docs/
+gh auth login # GitHub
+az login      # Azure DevOps
 ```
 
-That URL is the address of the file as it appears in your browser on
-github.com — open the model on GitHub and copy the address bar.
+Then copy the model's browser URL and import it. GitHub and Azure DevOps use
+slightly different URL shapes:
+
+```sh
+modelith deps import https://github.com/acme/billing/blob/main/docs/payments.modelith.yaml docs/
+modelith deps import "https://dev.azure.com/acme/billing/_git/models?path=docs/payments.modelith.yaml&version=GBmain" docs/
+```
 
 ## What you get
 
@@ -43,6 +51,7 @@ never has one, and never meets any of this.
 | `vendored` | That this file is a copy. Nothing enforces it; it is there so a person or an agent about to edit the file stops. |
 | `fetch` | How to get it again. `git` today. |
 | `origin`, `path`, `ref` | Where it came from and what to track. A tag in `ref` pins the copy; a branch follows it. |
+| `ref-type` | Azure DevOps only: the kind of ref `ref` names — `branch`, `tag`, `commit`, or `auto` — so a refresh rebuilds the same typed request. Omitted for GitHub, whose API resolves an untyped ref. |
 | `commit` | The commit that last touched *this file* at that ref — so it does not move when unrelated commits land. |
 | `imported` | When you fetched it. |
 | `digest` | SHA-256 of the file with the header lines removed, so stamping the header does not change it. |
@@ -195,6 +204,18 @@ that matched none of your copies does not read as good news. To find them:
 git grep -l '# modelith-vendored'
 ```
 
+:::note[Azure DevOps copies record how pinned they are]
+
+An Azure DevOps URL carries a version *type* (`GB` branch, `GT` tag, `GC`
+commit), which a branch and a tag sharing a name would answer differently. The
+header records it as `modelith-ref-type`, so a later `deps check` or `deps
+update` asks for the same typed version the import did rather than letting the
+API infer one. An unprefixed URL, or a `--ref` override, records `auto`, which
+is what leaves the inference to the API. GitHub has no such key: its API
+resolves an untyped ref on its own.
+
+:::
+
 ### Two ways to track a model
 
 Which one you are on is whatever `# modelith-ref:` records.
@@ -271,15 +292,15 @@ already solves.
 
 ## Requirements and limits
 
-- **`gh` must be installed and authenticated.** modelith implements no network
-  transport of its own; it delegates to the [GitHub
-  CLI](https://cli.github.com), which already solves authentication for private
-  and internal repositories.
-- **GitHub only, for now.** A URL on another host is an error that asks you to
-  [open an issue](https://github.com/stacklok/modelith/issues). That is not a
-  brush-off: the header records *how* it was fetched, so adding another
-  transport is straightforward — what is missing is a real user to build it
-  for, and an issue is how you become one.
+- **Install the CLI for the host you import from.** For GitHub, install and
+  authenticate the [GitHub CLI](https://cli.github.com). For Azure DevOps,
+  install the [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/) and run
+  `az login`. modelith delegates authentication to these tools.
+- **Import and refresh from github.com or dev.azure.com.** An Azure DevOps URL
+  has the form
+  `https://dev.azure.com/<ORGANIZATION>/<PROJECT>/_git/<REPOSITORY>?path=<PATH>&version=GB<BRANCH>`.
+  To request another host, [open an
+  issue](https://github.com/stacklok/modelith/issues).
 - **`lint` and `render` never touch the network**, whatever you pass them
   ([ADR-0011](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0011-network-boundary.md)).
   Everything under `modelith deps` is opt-in, and nothing else fetches.

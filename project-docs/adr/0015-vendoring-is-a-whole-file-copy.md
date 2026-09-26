@@ -5,6 +5,10 @@ and verified offline against a SHA-256 of its own bytes. Vendoring does not
 recurse, the fetch is `gh`-only, and the trust warning prints rather than
 blocks. Supersedes ADR-0010's **Digest** section; the rest of ADR-0010 stands.
 
+> **Amended 2026-09-26.** The **`gh` is the only transport** decision below is
+> superseded — Azure DevOps is now a second origin for `deps import`. Everything
+> else in this record stands unchanged; see the Amendment at the end.
+
 ## Context
 
 ADR-0010 specified vendoring in full before any of it was built. Implementing
@@ -143,3 +147,100 @@ step is the real gate.
   case for that rule, since it is where someone else's prose lands in your
   published document, but it shares no code with this change and is a visibly
   broken document rather than a privilege boundary.
+
+## Amendment — Azure DevOps as a second transport (2026-09-26)
+
+This amendment supersedes the **`gh` is the only transport** decision above.
+Nothing else in this record changes: the content digest, the header shape, the
+suppression rules, the non-recursive fetch, and the print-don't-block warning
+all stand.
+
+ADR-0007 set the bar for a second transport at "a real user exists". That user
+arrived: canonical domain models hosted in private Azure DevOps Git
+repositories (`dev.azure.com`). `deps import` now accepts a `dev.azure.com` blob
+URL alongside a `github.com` one.
+
+**Delegation, not a transport.** The fetch still hands off to an external CLI,
+executed as an argv array with no shell, so `modelith` acquires no HTTP client,
+no TLS configuration, and no credential handling (ADR-0011). Where GitHub
+delegates to `gh api`, Azure DevOps delegates to `az rest`. Authentication is
+whatever the user's own CLI session is — `gh auth login`, `az login` — and the
+binary never sees a token. An earlier revision of this work fetched through
+`curl` with a token read from `az account get-access-token`; it was reverted,
+because routing a credential through the binary's argument list breaks the
+no-credential property ADR-0011 keeps, and no `curl` invocation restores it.
+
+**The AAD audience is passed explicitly.** `az rest` cannot derive an Azure
+DevOps audience from a `dev.azure.com` URL, so requests carry
+`--resource 499b84ac-1321-427f-aa17-267ca6975798`, the well-known Microsoft
+first-party application ID for Azure DevOps. That is a fact about the `az` CLI,
+not configuration modelith invents.
+
+**Byte fidelity is a fetch-path concern.** `az rest` appends a newline when it
+prints a raw body to stdout, which by itself moves the copy's digest off
+canonical. Content is therefore written to a temp file with `--output-file` and
+read back, so the vendored bytes match the origin by construction rather than by
+trusting a printer. `gh` needs no such step; it returns the raw body unchanged.
+
+**`fetch: git` still names what the origin is.** The recorded `origin` is the
+repository URL (`https://dev.azure.com/<org>/<project>/_git/<repo>`), so an ADO
+copy is verified offline against its digest exactly like a GitHub one, and a
+legacy `*.visualstudio.com` URL is refused at parse time with a pointer to the
+`dev.azure.com` address, since the host moved.
+
+**Process lifecycle is bounded.** A delegated command that spawns helpers
+inheriting its pipes can hold `Wait()` open past a context deadline. On Unix the
+whole process group is killed (`Setpgid` plus a negative-PID `SIGKILL`), with
+`cmd.WaitDelay` bounding the pipe drain if a helper escapes the group; on
+Windows, which has no POSIX process groups, the direct child is killed and
+`WaitDelay` still bounds the wait. A `--timeout` decorator gives each delegated
+command its own deadline, and the resulting message distinguishes a fired
+deadline from a caller's cancel (e.g. Ctrl+C) rather than reporting both as a
+timeout.
+
+**The Items API is asked for bytes.** The content fetch passes `download=true`.
+Without it the endpoint returns a JSON `GitItem` describing the item rather than
+its content, which the model parser then rejects; with it the body is the file,
+and `--output-file` writes those bytes verbatim.
+
+**The header gains one optional key, `ref-type`.** An Azure DevOps version has a
+*type* — `GB` a branch, `GT` a tag, `GC` a commit — and `az`'s API takes the type
+alongside the value. Letting the API infer it is not equivalent: a branch and a
+tag may share a name, and the two answer differently. So an ADO import records
+`# modelith-ref-type:` as `branch`, `tag`, or `commit`, or `auto` when the URL
+left the type unprefixed or `--ref` overrode it — the case where inference is
+what was asked for. The key is optional and *omitted* for GitHub, whose API
+resolves an untyped ref on its own: a header written before the key existed
+still parses, and no GitHub header changes shape.
+
+**Refresh is first-class for both hosts.** `deps check` and `deps update`
+dispatch on the origin's host. A `github.com` origin is rebuilt into a blob URL
+as before; a `dev.azure.com` origin is rebuilt into the typed ADO address, using
+the `origin` (organization, project, repository), `path`, `ref`, and the new
+`ref-type`. The content and commit fetchers dispatch the same way, so a copy from
+either host is checked and updated rather than only imported. A copy from a host
+this build has no transport for is still refused per file — as a `Report`, so a
+run that also holds reachable copies still judges them — with an error naming the
+origin rather than failing as a malformed URL.
+
+Pinned by `TestImport_ADO_StampsAVerifiableCopy` and the rest of the
+`TestImport_ADO_*` set (import end to end, the ref-type prefixes, the `--ref`
+override, and `download=true` on the items request),
+`TestRefresh_ADOCopyIsFirstClass` (check and update dispatch to `az rest` and
+keep the recorded ref type), `TestRefresh_RefusesAnUnknownHost` (a host with no
+transport), `TestExecRunner_KillsTheWholeProcessGroup` and
+`TestExecRunner_WaitDelayBoundsAPipeHeldByAStrayChild` (the process lifecycle),
+and the `TestTimeoutRunner_*` set (the deadline message).
+
+### Amendment consequences
+
+- `deps import`, `deps check`, and `deps update` accept `github.com` and
+  `dev.azure.com` origins.
+- `az` is a runtime prerequisite for Azure DevOps origins, the way `gh` is for
+  GitHub; the "not installed" hint names the right CLI for the one that is
+  missing.
+- Offline `lint` verifies an Azure DevOps copy against its digest identically to
+  a GitHub one.
+- A header for a non-GitHub origin carries `modelith-ref-type:`, and one for
+  GitHub does not — so a GitHub header written by an earlier release is
+  byte-identical to one written now.

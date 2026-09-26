@@ -15,6 +15,7 @@ const vendored = `# yaml-language-server: $schema=https://modelith.sh/schema/dom
 # modelith-origin: https://github.com/stacklok/some-repo
 # modelith-path: docs/payments.modelith.yaml
 # modelith-ref: main
+# modelith-ref-type: branch
 # modelith-commit: 4f2c1e9c8b3ad0e5f71b2c9a6d4e8f30ab5c7d21
 # modelith-imported: 2026-07-27
 # modelith-digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
@@ -67,6 +68,7 @@ func TestParse_Valid(t *testing.T) {
 		Origin:   "https://github.com/stacklok/some-repo",
 		Path:     "docs/payments.modelith.yaml",
 		Ref:      "main",
+		RefType:  "branch",
 		Commit:   "4f2c1e9c8b3ad0e5f71b2c9a6d4e8f30ab5c7d21",
 		Imported: "2026-07-27",
 		Digest:   "sha256:" + strings.Repeat("0", 64),
@@ -100,6 +102,7 @@ func TestParse_Problems(t *testing.T) {
 				"origin":   "https://github.com/stacklok/some-repo",
 				"path":     "docs/payments.modelith.yaml",
 				"ref":      "main",
+				"ref-type": "branch",
 				"commit":   "4f2c1e9",
 				"imported": "2026-07-27",
 				"digest":   "sha256:" + strings.Repeat("0", 64),
@@ -149,8 +152,14 @@ func TestParse_Problems(t *testing.T) {
 		{
 			name:     "a malformed digest names the shape",
 			src:      header(map[string]string{"digest": "sha256:nope"}),
-			wantLine: 9,
+			wantLine: 10,
 			contains: "sha256:<64 hex digits>",
+		},
+		{
+			name:     "a ref-type outside the closed set is reported",
+			src:      header(map[string]string{"ref-type": "sausage"}),
+			wantLine: 7,
+			contains: `provenance ref-type "sausage" is not one of`,
 		},
 		{
 			name:     "a provenance line below the model content is misplaced",
