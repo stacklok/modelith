@@ -312,5 +312,6 @@ already solves.
 The design and its trade-offs are
 [ADR-0010](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0010-cross-model-references-by-vendoring.md),
 [ADR-0015](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0015-vendoring-is-a-whole-file-copy.md),
+[ADR-0016](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0016-staleness-is-a-content-comparison.md),
 and
-[ADR-0016](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0016-staleness-is-a-content-comparison.md).
+[ADR-0019](https://github.com/stacklok/modelith/blob/main/project-docs/adr/0019-azure-devops-as-a-second-transport.md).

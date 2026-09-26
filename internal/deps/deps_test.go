@@ -269,6 +269,48 @@ func importInto(t *testing.T, dir string, r *fakeRunner, url string) (*Result, e
 	})
 }
 
+// TestADR_0019_RefTypeIsRecordedOnlyWhereItIsNeeded pins the one header change
+// ADR-0019 makes. Azure DevOps takes a version's *type* alongside its value, and
+// letting the API infer it is not equivalent when a branch and a tag share a
+// name, so an ADO import records it. GitHub's API resolves an untyped ref on its
+// own, so a GitHub header must not gain the key: that is what keeps a header
+// written before this change byte-identical to one written after it, with no
+// migration.
+func TestADR_0019_RefTypeIsRecordedOnlyWhereItIsNeeded(t *testing.T) {
+	t.Parallel()
+
+	ghDir := t.TempDir()
+	gh, err := importInto(t, ghDir, &fakeRunner{content: upstream, sha: sha}, blobURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.Header.RefType != "" {
+		t.Errorf("a GitHub header carries a ref type (%q); its API needs none, and the key must be omitted", gh.Header.RefType)
+	}
+	if got := readImportFile(t, gh.Path); strings.Contains(got, "# modelith-ref-type:") {
+		t.Errorf("a GitHub copy was stamped with a ref-type line:\n%s", got)
+	}
+
+	adoDir := t.TempDir()
+	ado, err := importAdoInto(t, adoDir, adoRunner(adoContent, adoCommit), adoBlobURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ado.Header.RefType != "branch" {
+		t.Errorf("an ADO header recorded ref type %q, want %q for a GB URL", ado.Header.RefType, "branch")
+	}
+}
+
+// readImportFile reads a file a test just wrote, failing on error.
+func readImportFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 func TestImport_StampsAVerifiableCopy(t *testing.T) {
 	t.Parallel()
 
