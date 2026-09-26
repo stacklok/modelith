@@ -443,10 +443,13 @@ func (u *unusableRunner) Run(context.Context, string, ...string) ([]byte, error)
 	return nil, unusable{errors.New("gh is not installed — modelith delegates fetching to it")}
 }
 
-// TestUnauthenticatedMatchesGhsOwnText pins the needles against the messages gh
-// actually emits, quoted from its binary. gh reports this on stderr and exits 1,
-// so there is no typed error to unwrap and nothing else to key on.
-func TestUnauthenticatedMatchesGhsOwnText(t *testing.T) {
+// TestUnauthenticatedMatchesTheClisOwnText pins the needles against the
+// messages the delegated CLIs actually emit. Each reports this on stderr and
+// exits non-zero, so there is no typed error to unwrap and nothing else to key
+// on. az matters here as much as gh: a batch keys on ErrToolUnavailable to
+// decide whether to stop, so an unclassified az would repeat the same
+// paragraph once per copy.
+func TestUnauthenticatedMatchesTheClisOwnText(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -454,12 +457,16 @@ func TestUnauthenticatedMatchesGhsOwnText(t *testing.T) {
 		msg  string
 		want bool
 	}{
-		{"logged out entirely", "To get started with GitHub CLI, please run:  gh auth login", true},
-		{"a workflow with no token", "gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment variable.", true},
-		{"automation with no token", "gh: To use GitHub CLI in automation, set the GH_TOKEN environment variable.", true},
-		{"a token that is refused", "gh: Bad credentials (HTTP 401)", true},
-		{"a file that is not there", "gh: HTTP 404: Not Found (https://api.github.com/repos/a/b/contents/c)", false},
-		{"a repository that is private", "gh: HTTP 403: Forbidden", false},
+		{"gh logged out entirely", "To get started with GitHub CLI, please run:  gh auth login", true},
+		{"gh workflow with no token", "gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment variable.", true},
+		{"gh automation with no token", "gh: To use GitHub CLI in automation, set the GH_TOKEN environment variable.", true},
+		{"gh token that is refused", "gh: Bad credentials (HTTP 401)", true},
+		{"az with no session", "Please run 'az login' to setup account.", true},
+		{"az with an expired session", "ERROR: AADSTS700082: The refresh token has expired due to inactivity.", true},
+		{"az token that is refused", "az: Bad credentials (HTTP 401)", true},
+		{"gh file that is not there", "gh: HTTP 404: Not Found (https://api.github.com/repos/a/b/contents/c)", false},
+		{"gh repository that is private", "gh: HTTP 403: Forbidden", false},
+		{"az resource that is not there", "az: 404 Not Found: the item does not exist", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -468,6 +475,138 @@ func TestUnauthenticatedMatchesGhsOwnText(t *testing.T) {
 				t.Errorf("unauthenticated(%q) = %v, want %v", tc.msg, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestSurvey_TimeoutBoundsEachDelegatedCall pins that deps check and deps
+// update honour --timeout the way deps import does. Without it a stalled gh or
+// az wedges a scheduled CI check indefinitely, which is the whole reason the
+// bound exists on the import path.
+func TestSurvey_TimeoutBoundsEachDelegatedCall(t *testing.T) {
+	t.Parallel()
+
+	t.Run("check passes the bound through", func(t *testing.T) {
+		t.Parallel()
+		a, _ := vendored(t, upstream)
+		r := &hangRunner{}
+		start := time.Now()
+		reports, err := Check(context.Background(), CheckOptions{
+			Paths: []string{a}, Timeout: 200 * time.Millisecond, Run: r,
+		})
+		if err != nil {
+			t.Fatalf("Check aborted: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Errorf("the bound did not hold: took %s", elapsed)
+		}
+		if len(reports) != 1 || reports[0].Err == nil {
+			t.Fatalf("a hung CLI produced no per-file error: %+v", reports)
+		}
+		if !strings.Contains(reports[0].Err.Error(), "did not finish within") {
+			t.Errorf("the failure does not read as a timeout: %v", reports[0].Err)
+		}
+		if r.calls != 1 {
+			t.Errorf("the hung call was made %d times, want 1", r.calls)
+		}
+	})
+
+	t.Run("update passes the bound through", func(t *testing.T) {
+		t.Parallel()
+		a, _ := vendored(t, upstream)
+		r := &hangRunner{}
+		reports, err := Update(context.Background(), UpdateOptions{
+			Paths: []string{a}, Timeout: 200 * time.Millisecond, Run: r,
+		})
+		if err != nil {
+			t.Fatalf("Update aborted: %v", err)
+		}
+		if len(reports) != 1 || reports[0].Err == nil {
+			t.Fatalf("a hung CLI produced no per-file error: %+v", reports)
+		}
+		if !strings.Contains(reports[0].Err.Error(), "did not finish within") {
+			t.Errorf("the failure does not read as a timeout: %v", reports[0].Err)
+		}
+	})
+
+	t.Run("no bound means no decoration", func(t *testing.T) {
+		t.Parallel()
+		a, _ := vendored(t, upstream)
+		r := &fakeRunner{content: upstream, sha: sha}
+		if _, err := Check(context.Background(), CheckOptions{Paths: []string{a}, Run: r}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+// hangRunner blocks until the context is done, then reports why — a stand-in
+// for a CLI that never answers.
+type hangRunner struct{ calls int }
+
+func (h *hangRunner) Run(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+	h.calls++
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestRefresh_ADORepinDropsTheRecordedType pins the bug this fix repairs: a
+// copy imported as an ADO branch and then re-pinned to a tag must not carry the
+// old type prefix. "GBv1.0.0" asks Azure DevOps for a branch of that name, so
+// the request 404s and the copy cannot be re-pinned at all. The header must
+// also stop claiming the ref is a branch.
+func TestRefresh_ADORepinDropsTheRecordedType(t *testing.T) {
+	t.Parallel()
+
+	path := vendoredFromADO(t)
+	if got := readFile(t, path); !strings.Contains(got, "# modelith-ref-type: branch") {
+		t.Fatalf("the fixture is not a branch-typed ADO copy:\n%s", got)
+	}
+
+	r := adoRunner(adoContent, adoCommit)
+	rep := update(t, r, "v1.0.0", path)[0]
+	if rep.Err != nil {
+		t.Fatalf("repin failed: %v", rep.Err)
+	}
+
+	// The request must carry no versionType at all: the override names a ref
+	// whose type the header cannot know, so the API is left to infer it.
+	if len(r.calls) == 0 {
+		t.Fatal("the repin made no az call")
+	}
+	for _, call := range r.calls {
+		if uri := azURI(call); strings.Contains(uri, "versionType") {
+			t.Errorf("the repin pinned a type the header could not know: %s", uri)
+		}
+	}
+
+	after := readFile(t, path)
+	for _, want := range []string{"# modelith-ref: v1.0.0", "# modelith-ref-type: auto"} {
+		if !strings.Contains(after, want) {
+			t.Errorf("the re-pinned copy does not contain %q:\n%s", want, after)
+		}
+	}
+	if strings.Contains(after, "# modelith-ref-type: branch") {
+		t.Error("the header still claims the ref is a branch after a tag repin")
+	}
+}
+
+// TestRefresh_ADOBareRefreshKeepsTheRecordedType pins the other half: a refresh
+// that does not re-pin must keep asking for the same typed version the import
+// did, because auto-detection is not equivalent when a branch and a tag share a
+// name.
+func TestRefresh_ADOBareRefreshKeepsTheRecordedType(t *testing.T) {
+	t.Parallel()
+
+	path := vendoredFromADO(t)
+	r := adoRunner(moved, laterSHA)
+	rep := update(t, r, "", path)[0]
+	if rep.Err != nil {
+		t.Fatalf("refresh failed: %v", rep.Err)
+	}
+	if uri := azURI(r.calls[0]); !strings.Contains(uri, "versionType=branch") {
+		t.Errorf("a bare refresh dropped the recorded type: %s", uri)
+	}
+	if after := readFile(t, path); !strings.Contains(after, "# modelith-ref-type: branch") {
+		t.Errorf("a bare refresh did not keep the recorded type:\n%s", after)
 	}
 }
 

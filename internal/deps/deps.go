@@ -108,18 +108,21 @@ func (r timeoutRunner) Run(ctx context.Context, name string, args ...string) ([]
 	return out, err
 }
 
-// unauthenticated reports whether gh refused for want of credentials rather
-// than because of anything about the request.
+// unauthenticated reports whether a delegated CLI refused for want of
+// credentials rather than because of anything about the request.
 //
-// It matches gh's own text because gh is a separate program: it reports this on
-// stderr and exits 1, with no typed error to unwrap and no distinguishing exit
-// code. The three needles are the ones gh's binary actually carries — "gh auth
-// login" appears in every logged-out message, "GH_TOKEN" in the two automation
-// ones, and HTTP 401 is a token that exists and is refused. Reading it wrong
-// costs a batch that stops when it could have continued, or one that repeats
-// the same paragraph per file.
+// It matches the CLI's own text because each is a separate program: it reports
+// this on stderr and exits non-zero, with no typed error to unwrap and no
+// distinguishing exit code. For gh, "gh auth login" appears in every logged-out
+// message and "GH_TOKEN" in the two automation ones; for az, a missing or
+// expired session prints "az login" (e.g. "Please run 'az login'…") and the
+// AADSTS diagnostics carry an "AADSTS…" code. HTTP 401 is a token that exists
+// and is refused, whichever CLI sent it. Reading it wrong costs a batch that
+// stops when it could have continued, or one that repeats the same paragraph
+// per file — and an unclassified az would do the latter, since a batch keys on
+// ErrToolUnavailable to decide whether to stop.
 func unauthenticated(msg string) bool {
-	for _, needle := range []string{"gh auth login", "GH_TOKEN", "HTTP 401"} {
+	for _, needle := range []string{"gh auth login", "GH_TOKEN", "az login", "AADSTS", "HTTP 401"} {
 		if strings.Contains(msg, needle) {
 			return true
 		}

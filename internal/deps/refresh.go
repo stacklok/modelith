@@ -14,11 +14,12 @@ import (
 	"github.com/stacklok/modelith/internal/provenance"
 )
 
-// ErrToolUnavailable marks a failure of gh itself rather than of the request:
-// it is not installed, or it holds no usable credentials. Every file in a run
-// would fail it identically, so a batch stops on it instead of repeating the
-// same paragraph once per copy.
-var ErrToolUnavailable = errors.New("gh is unavailable")
+// ErrToolUnavailable marks a failure of the delegated CLI itself rather than of
+// the request: it is not installed, or it holds no usable credentials. Every
+// file in a run would fail it identically, so a batch stops on it instead of
+// repeating the same paragraph once per copy. It is not GitHub-specific — a
+// copy fetched through az fails it the same way.
+var ErrToolUnavailable = errors.New("the delegated CLI is unavailable")
 
 // State is one vendored copy measured against its origin.
 //
@@ -101,6 +102,10 @@ type CheckOptions struct {
 	// Paths are the files to check. One that carries no provenance header is
 	// skipped, because the glob a user passes to lint holds their own models too.
 	Paths []string
+	// Timeout bounds each delegated command (gh, az) individually. Zero means
+	// no bound. A check that reaches many copies is exactly where a hung CLI
+	// would otherwise stall a whole CI run, so the bound belongs here too.
+	Timeout time.Duration
 	// Run is the command seam; nil uses ExecRunner.
 	Run Runner
 }
@@ -114,6 +119,9 @@ type UpdateOptions struct {
 	Ref string
 	// Now stamps a refreshed header's imported date, in local time.
 	Now time.Time
+	// Timeout bounds each delegated command (gh, az) individually. Zero means
+	// no bound.
+	Timeout time.Duration
 	// Run is the command seam; nil uses ExecRunner.
 	Run Runner
 }
@@ -126,7 +134,7 @@ type UpdateOptions struct {
 // non-nil error means the run stopped before it could measure a file because gh
 // was unusable while fetching its content.
 func Check(ctx context.Context, opts CheckOptions) ([]Report, error) {
-	return survey(ctx, surveyOptions{paths: opts.Paths, run: opts.Run})
+	return survey(ctx, surveyOptions{paths: opts.Paths, timeout: opts.Timeout, run: opts.Run})
 }
 
 // Update brings each vendored copy forward to what its origin serves now.
@@ -141,21 +149,25 @@ func Update(ctx context.Context, opts UpdateOptions) ([]Report, error) {
 			"--ref re-pins one copy and %d files were named — a single ref across several origins names a different version in each. Run it once per copy",
 			len(opts.Paths))
 	}
-	return survey(ctx, surveyOptions{paths: opts.Paths, ref: opts.Ref, now: opts.Now, run: opts.Run, write: true})
+	return survey(ctx, surveyOptions{paths: opts.Paths, ref: opts.Ref, now: opts.Now, timeout: opts.Timeout, run: opts.Run, write: true})
 }
 
 type surveyOptions struct {
-	paths []string
-	ref   string
-	now   time.Time
-	run   Runner
-	write bool
+	paths   []string
+	ref     string
+	now     time.Time
+	timeout time.Duration
+	run     Runner
+	write   bool
 }
 
 func survey(ctx context.Context, opts surveyOptions) ([]Report, error) {
 	runner := opts.run
 	if runner == nil {
 		runner = ExecRunner{}
+	}
+	if opts.timeout > 0 {
+		runner = timeoutRunner{inner: runner, timeout: opts.timeout}
 	}
 	reports := make([]Report, 0, len(opts.paths))
 	for _, p := range opts.paths {
@@ -286,6 +298,11 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 	}
 	next := *h
 	next.Ref = ref
+	// The ref type is not copied from the old header: a repin changes what the
+	// ref names, and even a bare refresh may have had its type inferred, so the
+	// record is rebuilt from what the fetch actually resolved to. It is empty
+	// for GitHub, which keeps its header shape.
+	next.RefType = recordedRefType(src)
 	next.Commit = commit
 	next.Imported = opts.now.Format("2006-01-02")
 	next.Digest = provenance.Digest(upstream)
@@ -354,7 +371,17 @@ func adoSourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 	}
 	q := url.Values{}
 	q.Set("path", h.Path)
-	q.Set("version", adoVersionPrefix(h.RefType)+ref)
+	// The prefix encodes the ref's type. On a plain refresh the recorded type
+	// still describes the same ref, so it is reused. A --ref override names a
+	// ref whose type the header cannot know — a branch may be re-pinned to a
+	// tag, and "GBv1.0.0" would ask ADO for a branch that does not exist — so
+	// the prefix is dropped and the API is left to infer it, exactly as an
+	// import with --ref does.
+	prefix := adoVersionPrefix(h.RefType)
+	if ref != h.Ref {
+		prefix = ""
+	}
+	q.Set("version", prefix+ref)
 	u.RawQuery = q.Encode()
 	// The ref type rides in the version prefix, so ParseSource is not asked to
 	// override the ref: an override would reset the type to auto-detect, which

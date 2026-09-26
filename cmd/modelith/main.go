@@ -245,6 +245,7 @@ func printTrustWarning(errOut io.Writer) {
 }
 
 func depsCheckCmd() *cobra.Command {
+	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "check <file>...",
 		Short: "Report which vendored copies have fallen behind their origin",
@@ -263,14 +264,18 @@ A copy pinned to a tag is reported as up to date for as long as that tag points
 where it did; modelith does not look for newer releases. Every line names the
 ref it was checked against.
 
-Fetching is delegated to the gh CLI, which must be installed and authenticated.
-Nothing is written.`),
+Fetching is delegated to the gh CLI for github.com origins and the az CLI for
+dev.azure.com ones, each of which must be installed and authenticated. Nothing
+is written.
+
+Each fetch is bounded by --timeout (default 60s, 0 disables the bound): a hung
+CLI fails fast instead of stalling the run.`),
 		Example: strings.TrimSpace(`
   modelith deps check docs/payments.modelith.yaml
   modelith deps check docs/*.modelith.yaml`),
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			reports, err := deps.Check(cmd.Context(), deps.CheckOptions{Paths: args})
+			reports, err := deps.Check(cmd.Context(), deps.CheckOptions{Paths: args, Timeout: timeout})
 			// A run that got nowhere has nothing to summarise, and "checked 0
 			// vendored copies" above the reason would read as the outcome.
 			blocking := len(reports) > 0 && printCheckReports(cmd.OutOrStdout(), cmd.ErrOrStderr(), reports)
@@ -283,11 +288,16 @@ Nothing is written.`),
 			return nil
 		},
 	}
+	cmd.Flags().DurationVar(&timeout, "timeout", 60*time.Second,
+		"abandon a delegated fetch (gh/az) that exceeds this duration; 0 disables the bound")
 	return cmd
 }
 
 func depsUpdateCmd() *cobra.Command {
-	var ref string
+	var (
+		ref     string
+		timeout time.Duration
+	)
 	cmd := &cobra.Command{
 		Use:   "update <file>...",
 		Short: "Bring vendored copies forward to what their origins serve",
@@ -308,7 +318,11 @@ imports list, and it does not lint: an item a copy used to define may have been
 renamed or removed upstream, and modelith lint is what reports that from the
 importing model's seat.
 
-Fetching is delegated to the gh CLI, which must be installed and authenticated.`),
+Fetching is delegated to the gh CLI for github.com origins and the az CLI for
+dev.azure.com ones, each of which must be installed and authenticated.
+
+Each fetch is bounded by --timeout (default 60s, 0 disables the bound): a hung
+CLI fails fast instead of stalling the run.`),
 		Example: strings.TrimSpace(`
   modelith deps update docs/payments.modelith.yaml
   modelith deps update docs/*.modelith.yaml
@@ -316,9 +330,10 @@ Fetching is delegated to the gh CLI, which must be installed and authenticated.`
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reports, err := deps.Update(cmd.Context(), deps.UpdateOptions{
-				Paths: args,
-				Ref:   ref,
-				Now:   time.Now(),
+				Paths:   args,
+				Ref:     ref,
+				Now:     time.Now(),
+				Timeout: timeout,
 			})
 			// See depsCheckCmd: nothing reached means nothing to summarise.
 			blocking := len(reports) > 0 && printUpdateReports(cmd.OutOrStdout(), cmd.ErrOrStderr(), reports)
@@ -332,6 +347,8 @@ Fetching is delegated to the gh CLI, which must be installed and authenticated.`
 		},
 	}
 	cmd.Flags().StringVar(&ref, "ref", "", "re-pin the copy to this ref (one file only)")
+	cmd.Flags().DurationVar(&timeout, "timeout", 60*time.Second,
+		"abandon a delegated fetch (gh/az) that exceeds this duration; 0 disables the bound")
 	return cmd
 }
 
