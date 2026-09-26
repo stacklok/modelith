@@ -271,6 +271,33 @@ func TestRefresh_AnUnknownHostDoesNotStopTheRun(t *testing.T) {
 	}
 }
 
+// TestSurvey_ResolutionAbortsOnUnusableCLI pins that resolving a ref type goes
+// through the same stop-the-batch rule as a fetch. The lookup needs the CLI, so
+// an absent or unauthenticated az has to end the run rather than be reported
+// once per copy as if each file were separately at fault.
+func TestSurvey_ResolutionAbortsOnUnusableCLI(t *testing.T) {
+	t.Parallel()
+
+	path := vendoredFromADO(t)
+	// Drop the key, so the check has to resolve the type before it can fetch.
+	without := strings.Replace(readFile(t, path), "# modelith-ref-type: branch\n", "", 1)
+	if err := os.WriteFile(path, []byte(without), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &unusableRunner{}
+	reports, err := Check(context.Background(), CheckOptions{Paths: []string{path}, Run: r})
+	if !errors.Is(err, ErrToolUnavailable) {
+		t.Fatalf("Check returned %v, want an ErrToolUnavailable from the refs lookup", err)
+	}
+	if len(reports) != 0 {
+		t.Errorf("got %d reports, want none — the run was abandoned before judging: %+v", len(reports), reports)
+	}
+	if r.calls != 1 {
+		t.Errorf("the run made %d calls after the CLI proved unusable, want 1", r.calls)
+	}
+}
+
 func TestCheck_ReportsWhetherTheOriginMoved(t *testing.T) {
 	t.Parallel()
 

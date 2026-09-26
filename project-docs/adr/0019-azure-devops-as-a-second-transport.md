@@ -71,9 +71,9 @@ as before; a `dev.azure.com` origin is rebuilt into the typed ADO address from
 `origin` (organization, project, repository), `path`, `ref`, and `ref-type`. The
 content and commit fetchers dispatch the same way, so a copy from either host is
 checked and updated rather than only imported. A `--ref` re-pin drops the
-recorded type so the API infers the new ref's type — a branch re-pinned to a tag
-must not ask for a branch named after the tag — and the header's `ref-type` is
-rewritten from what the fetch resolved. A copy from a host with no transport is
+recorded type, which is then resolved afresh — a branch re-pinned to a tag must
+not ask for a branch named after the tag, and an untyped request would be read
+as one — and the header's `ref-type` is rewritten from what was resolved. A copy from a host with no transport is
 still refused per file — a `Report`, not a run abort, so a mixed run still
 judges its reachable copies — with an error naming the origin.
 

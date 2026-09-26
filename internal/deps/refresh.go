@@ -231,6 +231,12 @@ func visit(ctx context.Context, runner Runner, path string, opts surveyOptions) 
 	// type, so an untyped request is read as a branch and a tag- or
 	// commit-pinned copy would 404.
 	if err := resolveADORefType(ctx, runner, &src); err != nil {
+		// A refs lookup goes through the CLI too, so an absent or unauthenticated
+		// az has to stop the batch here exactly as it would on a fetch — the
+		// resolver would otherwise report it as one file's problem, once per copy.
+		if errors.Is(err, ErrToolUnavailable) {
+			return rep, err
+		}
 		rep.Err = err
 		return rep, nil
 	}
@@ -369,9 +375,9 @@ func sourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 // adoSourceFromHeader rebuilds an Azure DevOps fetch address from what a header
 // records. The origin carries the organization, project, and repository; path
 // and ref name the item and version; and ref-type — recorded at import — names
-// the kind of ref, so a refresh asks for the same typed version the import did
-// rather than letting the API infer one, which a branch and a tag sharing a name
-// would answer differently.
+// the kind of ref, so a refresh asks for the same typed version the import did.
+// The API does not infer a missing type (it reads one as a branch), so a header
+// without the key leaves the source untyped for resolveADORefType to fill in.
 func adoSourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 	u, err := url.Parse(normOrigin(h.Origin))
 	if err != nil {

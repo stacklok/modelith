@@ -368,10 +368,10 @@ func importInto(t *testing.T, dir string, r *fakeRunner, url string) (*Result, e
 }
 
 // TestADR_0019_RefTypeIsRecordedOnlyWhereItIsNeeded pins the one header change
-// ADR-0019 makes. Azure DevOps takes a version's *type* alongside its value, and
-// letting the API infer it is not equivalent when a branch and a tag share a
-// name, so an ADO import records it. GitHub's API resolves an untyped ref on its
-// own, so a GitHub header must not gain the key: that is what keeps a header
+// ADR-0019 makes. Azure DevOps takes a version's *type* alongside its value and
+// does not infer one (an untyped request is read as a branch), so an ADO import
+// resolves and records it. GitHub's API resolves an untyped ref on its own, so a
+// GitHub header must not gain the key: that is what keeps a header
 // written before this change byte-identical to one written after it, with no
 // migration.
 func TestADR_0019_RefTypeIsRecordedOnlyWhereItIsNeeded(t *testing.T) {
