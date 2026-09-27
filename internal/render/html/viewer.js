@@ -9,19 +9,9 @@
   const entities = model.entities || [];
   const list = items => items || [];
   const byName = new Map(entities.map(entity => [entity.name, entity]));
-  const columns = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(entities.length))));
-  const nodeHeight = entity => 70 + list(entity.relationships).filter(r => r.entity === entity.name).length * 20;
-  const rows = Math.ceil(entities.length / columns);
-  const rowY = [];
-  let nextY = 55;
-  for (let row = 0; row < rows; row++) {
-    rowY.push(nextY);
-    nextY += Math.max(...entities.slice(row * columns, (row + 1) * columns).map(nodeHeight)) + 150;
-  }
-  const positions = new Map(entities.map((entity, i) => [entity.name, {
-    x: 40 + (i % columns) * 460, y: rowY[Math.floor(i / columns)]
-  }]));
-  let initial;
+  const heights = new Map(entities.map(entity => [entity.name, 70 + list(entity.relationships).filter(r => r.entity === entity.name).length * 20]));
+  const nodeHeight = entity => heights.get(entity.name);
+  const positions = new Map();
   let view;
   const html = (tag, parent, text, className) => {
     const element = document.createElement(tag);
@@ -90,94 +80,186 @@
   const padding = 4;
   const expand = box => ({x: box.x - padding, y: box.y - padding, width: box.width + padding * 2, height: box.height + padding * 2});
   const intersects = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-  const pendingLabels = [];
   const pairs = new Map();
+  const connections = [];
+  entities.forEach(entity => {
+    const add = (target, label, kind) => {
+      if (!byName.has(target) || target === entity.name) return;
+      const pair = JSON.stringify([entity.name, target].sort());
+      const index = pairs.get(pair) || 0;
+      pairs.set(pair, index + 1);
+      connections.push({source: entity.name, target, label, kind, index});
+    };
+    list(entity.relationships).forEach(r => add(r.entity, `${r.role || '(no role)'} · ${r.cardinality}`, r.ownership === 'owned' ? 'owned' : 'referenced'));
+    if (entity.subtypeOf) add(entity.subtypeOf, 'is-a', 'isa');
+  });
   const boundary = (center, dx, dy) => {
     const scale = 1 / Math.max(Math.abs(dx) / 125, Math.abs(dy) / (center.h / 2));
     return {x: center.x + dx * scale, y: center.y + dy * scale};
   };
-  entities.forEach(entity => {
-    const from = positions.get(entity.name);
-    const drawEdge = (target, label, kind) => {
-      const to = positions.get(target);
-      if (!to || target === entity.name) return;
-      const pair = JSON.stringify([entity.name, target].sort());
-      const index = pairs.get(pair) || 0;
-      pairs.set(pair, index + 1);
-      const a = {x: from.x + 125, y: from.y + nodeHeight(entity) / 2, h: nodeHeight(entity)};
-      const b = {x: to.x + 125, y: to.y + nodeHeight(byName.get(target)) / 2, h: nodeHeight(byName.get(target))};
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const length = Math.hypot(dx, dy);
-      const offset = (index % 2 ? 1 : -1) * Math.ceil(index / 2) * 52 * (entity.name < target ? 1 : -1);
-      const px = -dy / length, py = dx / length;
-      const c = {x: (a.x + b.x) / 2 + px * offset, y: (a.y + b.y) / 2 + py * offset};
-      const start = boundary(a, c.x - a.x, c.y - a.y);
-      const end = boundary(b, c.x - b.x, c.y - b.y);
-      shape('path', edges, {d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}`,
-        class: `edge ${kind}`, 'marker-end': 'url(#arrow)'});
-      pendingLabels.push({label, anchor: {x: (start.x + 2 * c.x + end.x) / 4, y: (start.y + 2 * c.y + end.y) / 4}, normal: {x: px, y: py}});
-    };
-    list(entity.relationships).forEach(r => drawEdge(r.entity, `${r.role || '(no role)'} · ${r.cardinality}`, r.ownership === 'owned' ? 'owned' : 'referenced'));
-    if (entity.subtypeOf) drawEdge(entity.subtypeOf, 'is-a', 'isa');
-  });
-  const renderedNodeShapes = [];
+  const renderedNodes = new Map();
+  let suppressClick = false;
+  const arrowSteps = {ArrowLeft: [-40, 0], ArrowRight: [40, 0], ArrowUp: [0, -40], ArrowDown: [0, 40]};
   entities.forEach((entity, i) => {
-    const p = positions.get(entity.name);
+    const p = {x: 40, y: 55};
+    positions.set(entity.name, p);
     const group = shape('g', nodes, {class: `node${entity.external ? ' external' : ''}${entity.derived ? ' derived' : ''}`, role: 'button', tabindex: 0, 'aria-labelledby': `node-title-${i}`});
     nodeEntities.set(group, entity);
     const title = shape('title', group, {id: `node-title-${i}`});
     title.textContent = `${entity.name}${entity.external ? ', external' : ''}${entity.derived ? ', derived' : ''}`;
-    renderedNodeShapes.push(shape('rect', group, {x: p.x, y: p.y, width: 250, height: nodeHeight(entity), rx: 8}));
-    renderedNodeShapes.push(textShape(group, entity.name, p.x + 125, p.y + 32, 'node-label'));
-    renderedNodeShapes.push(textShape(group, entity.external ? 'external' : entity.derived ? 'derived' : 'entity', p.x + 125, p.y + 54, 'edge-label'));
+    const shapes = [shape('rect', group, {x: p.x, y: p.y, width: 250, height: nodeHeight(entity), rx: 8}),
+      textShape(group, entity.name, p.x + 125, p.y + 32, 'node-label'),
+      textShape(group, entity.external ? 'external' : entity.derived ? 'derived' : 'entity', p.x + 125, p.y + 54, 'edge-label')];
     list(entity.relationships).filter(r => r.entity === entity.name).forEach((r, index) =>
-      renderedNodeShapes.push(textShape(group, `${r.role || '(no role)'} · ${r.cardinality}`, p.x + 125, p.y + 76 + index * 20, 'edge-label')));
-    group.addEventListener('click', () => select(entity.name));
+      shapes.push(textShape(group, `${r.role || '(no role)'} · ${r.cardinality}`, p.x + 125, p.y + 76 + index * 20, 'edge-label')));
+    renderedNodes.set(entity.name, {shapes,
+      left: Math.min(...shapes.map(s => s.getBBox().x)) - p.x,
+      right: Math.max(...shapes.map(s => s.getBBox().x + s.getBBox().width)) - p.x});
+    group.addEventListener('click', event => {
+      if (suppressClick) { event.preventDefault(); suppressClick = false; return; }
+      select(entity.name);
+    });
     group.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(entity.name); }
+      if (event.altKey && arrowSteps[event.key]) {
+        event.preventDefault(); event.stopPropagation();
+        moveNode(entity.name, ...arrowSteps[event.key]);
+      } else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(entity.name); }
     });
   });
-  const reserved = renderedNodeShapes.map(element => expand(element.getBBox()));
-  const placeLabel = ({label: value, anchor, normal}) => {
-    const label = textShape(labels, value, anchor.x, anchor.y, 'edge-label');
-    const tangent = {x: -normal.y, y: normal.x};
-    const candidates = [[0, 0]];
-    for (let ring = 1; ring <= 10; ring++) {
-      const away = 20 + ring * 28;
-      const along = ring * 18;
-      candidates.push([normal.x * away, normal.y * away], [-normal.x * away, -normal.y * away],
-        [normal.x * away + tangent.x * along, normal.y * away + tangent.y * along],
-        [normal.x * away - tangent.x * along, normal.y * away - tangent.y * along],
-        [-normal.x * away + tangent.x * along, -normal.y * away + tangent.y * along],
-        [-normal.x * away - tangent.x * along, -normal.y * away - tangent.y * along]);
-    }
-    let chosen;
-    for (const [x, y] of candidates) {
-      label.setAttribute('x', anchor.x + x);
-      label.setAttribute('y', anchor.y + y);
-      const box = expand(label.getBBox());
-      if (!reserved.some(other => intersects(box, other))) { chosen = {x: anchor.x + x, y: anchor.y + y, box}; break; }
-    }
-    if (!chosen) {
-      const y = reserved.reduce((max, box) => Math.max(max, box.y + box.height), anchor.y) + 28;
-      label.setAttribute('x', anchor.x);
-      label.setAttribute('y', y);
-      chosen = {x: anchor.x, y, box: expand(label.getBBox())};
-    }
-    reserved.push(chosen.box);
-    if (Math.hypot(chosen.x - anchor.x, chosen.y - anchor.y) > 24) {
-      const leader = shape('path', labels, {d: `M ${anchor.x} ${anchor.y} L ${chosen.x} ${chosen.y}`, class: 'edge-label-leader'});
-      labels.insertBefore(leader, label);
-    }
+  const moveNode = (name, dx, dy) => {
+    const p = positions.get(name);
+    p.x += dx; p.y += dy;
+    renderedNodes.get(name).shapes.forEach(s => {
+      s.setAttribute('x', Number(s.getAttribute('x')) + dx);
+      s.setAttribute('y', Number(s.getAttribute('y')) + dy);
+    });
+    scheduleDraw();
   };
-  pendingLabels.forEach(placeLabel);
-  const minX = Math.min(0, ...reserved.map(box => box.x));
-  const minY = Math.min(0, ...reserved.map(box => box.y));
-  const maxX = Math.max(0, ...reserved.map(box => box.x + box.width));
-  const maxY = Math.max(0, ...reserved.map(box => box.y + box.height));
-  initial = {x: minX, y: minY, w: Math.max(columns * 460 + 40, maxX - minX + 20),
-    h: Math.max(280, nextY - 90, maxY - minY + 20)};
-  view = {...initial};
+  const arrange = mode => {
+    const layers = [];
+    if (mode === 'grid') {
+      const columns = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(entities.length))));
+      for (let i = 0; i < entities.length; i += columns) layers.push(entities.slice(i, i + columns).map(e => e.name));
+    } else {
+      const incoming = new Map(entities.map(e => [e.name, 0]));
+      const outgoing = new Map(entities.map(e => [e.name, []]));
+      connections.forEach(({source, target}) => { incoming.set(target, incoming.get(target) + 1); outgoing.get(source).push(target); });
+      const visited = new Set();
+      const traverse = root => {
+        const queue = [[root, 0]];
+        visited.add(root);
+        for (let i = 0; i < queue.length; i++) {
+          const [name, depth] = queue[i];
+          (layers[depth] ||= []).push(name);
+          for (const target of outgoing.get(name)) if (!visited.has(target)) {
+            visited.add(target); queue.push([target, depth + 1]);
+          }
+        }
+      };
+      entities.forEach(e => { if (!incoming.get(e.name) && !visited.has(e.name)) traverse(e.name); });
+      entities.forEach(e => { if (!visited.has(e.name)) traverse(e.name); });
+    }
+    let axis = mode === 'flow-right' ? 40 : 55;
+    layers.forEach(names => {
+      let cross = mode === 'flow-right' ? 55 : 40;
+      for (const name of names) {
+        const node = renderedNodes.get(name);
+        const p = positions.get(name);
+        const x = mode === 'flow-right' ? axis - node.left : cross - node.left;
+        const y = mode === 'flow-right' ? cross : axis;
+        const dx = x - p.x, dy = y - p.y;
+        p.x = x; p.y = y;
+        node.shapes.forEach(s => {
+          s.setAttribute('x', Number(s.getAttribute('x')) + dx);
+          s.setAttribute('y', Number(s.getAttribute('y')) + dy);
+        });
+        cross += mode === 'flow-right' ? nodeHeight(byName.get(name)) + 110
+          : mode === 'grid' ? Math.max(460, node.right - node.left + 110) : node.right - node.left + 110;
+      }
+      axis += mode === 'flow-right'
+        ? Math.max(...names.map(name => renderedNodes.get(name).right - renderedNodes.get(name).left), 0) + 150
+        : Math.max(...names.map(name => nodeHeight(byName.get(name))), 0) + 150;
+    });
+    if (frame) { cancelAnimationFrame(frame); frame = 0; }
+    draw();
+    fit();
+  };
+  let reservations = [];
+  const draw = () => {
+    edges.replaceChildren();
+    labels.replaceChildren();
+    const pendingLabels = [];
+    const edgePoints = [];
+    connections.forEach(({source, target, label, kind, index}) => {
+      const from = positions.get(source), to = positions.get(target);
+      const a = {x: from.x + 125, y: from.y + nodeHeight(byName.get(source)) / 2, h: nodeHeight(byName.get(source))};
+      const b = {x: to.x + 125, y: to.y + nodeHeight(byName.get(target)) / 2, h: nodeHeight(byName.get(target))};
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const length = Math.hypot(dx, dy);
+      const px = length ? -dy / length : 0, py = length ? dx / length : 1;
+      const offset = (index % 2 ? 1 : -1) * Math.ceil(index / 2) * 52 * (source < target ? 1 : -1);
+      const c = {x: (a.x + b.x) / 2 + px * offset, y: (a.y + b.y) / 2 + py * offset};
+      const start = boundary(a, c.x - a.x || 1, c.y - a.y);
+      const end = boundary(b, c.x - b.x || -1, c.y - b.y);
+      edgePoints.push(start, c, end);
+      shape('path', edges, {d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}`,
+        class: `edge ${kind}`, 'marker-end': 'url(#arrow)'});
+      pendingLabels.push({label, anchor: {x: (start.x + 2 * c.x + end.x) / 4, y: (start.y + 2 * c.y + end.y) / 4}, normal: {x: px, y: py}});
+    });
+    const reserved = [...renderedNodes.values()].flatMap(node => node.shapes.map(s => expand(s.getBBox())));
+    const placeLabel = ({label: value, anchor, normal}) => {
+      const label = textShape(labels, value, anchor.x, anchor.y, 'edge-label');
+      const tangent = {x: -normal.y, y: normal.x};
+      const candidates = [[0, 0]];
+      for (let ring = 1; ring <= 10; ring++) {
+        const away = 20 + ring * 28;
+        const along = ring * 18;
+        candidates.push([normal.x * away, normal.y * away], [-normal.x * away, -normal.y * away],
+          [normal.x * away + tangent.x * along, normal.y * away + tangent.y * along],
+          [normal.x * away - tangent.x * along, normal.y * away - tangent.y * along],
+          [-normal.x * away + tangent.x * along, -normal.y * away + tangent.y * along],
+          [-normal.x * away - tangent.x * along, -normal.y * away - tangent.y * along]);
+      }
+      let chosen;
+      for (const [x, y] of candidates) {
+        label.setAttribute('x', anchor.x + x);
+        label.setAttribute('y', anchor.y + y);
+        const box = expand(label.getBBox());
+        if (!reserved.some(other => intersects(box, other))) { chosen = {x: anchor.x + x, y: anchor.y + y, box}; break; }
+      }
+      if (!chosen) {
+        const y = reserved.reduce((max, box) => Math.max(max, box.y + box.height), anchor.y) + 28;
+        label.setAttribute('x', anchor.x);
+        label.setAttribute('y', y);
+        chosen = {x: anchor.x, y, box: expand(label.getBBox())};
+      }
+      reserved.push(chosen.box);
+      if (Math.hypot(chosen.x - anchor.x, chosen.y - anchor.y) > 24) {
+        const leader = shape('path', labels, {d: `M ${anchor.x} ${anchor.y} L ${chosen.x} ${chosen.y}`, class: 'edge-label-leader'});
+        labels.insertBefore(leader, label);
+      }
+    };
+    pendingLabels.forEach(placeLabel);
+    reservations = reserved.concat(edgePoints.map(p => ({x: p.x, y: p.y, width: 0, height: 0})));
+  };
+  let frame = 0;
+  const scheduleDraw = () => {
+    if (!frame) frame = requestAnimationFrame(() => { frame = 0; draw(); });
+  };
+  const fit = () => {
+    if (frame) { cancelAnimationFrame(frame); frame = 0; draw(); }
+    const minX = reservations.reduce((min, box) => Math.min(min, box.x), Infinity);
+    const minY = reservations.reduce((min, box) => Math.min(min, box.y), Infinity);
+    const maxX = reservations.reduce((max, box) => Math.max(max, box.x + box.width), -Infinity);
+    const maxY = reservations.reduce((max, box) => Math.max(max, box.y + box.height), -Infinity);
+    view = reservations.length
+      ? {x: minX - 10, y: minY - 10, w: Math.max(500, maxX - minX + 20), h: Math.max(280, maxY - minY + 20)}
+      : {x: 0, y: 0, w: 500, h: 280};
+    applyView();
+  };
+  const layout = document.getElementById('layout');
+  document.getElementById('arrange').addEventListener('click', () => arrange(layout.value));
+  arrange('grid');
   const search = document.getElementById('search');
   search.addEventListener('input', () => {
     const query = search.value.toLocaleLowerCase();
@@ -185,32 +267,55 @@
   });
   document.getElementById('zoom-in').addEventListener('click', () => zoom(0.8));
   document.getElementById('zoom-out').addEventListener('click', () => zoom(1.25));
-  document.getElementById('reset').addEventListener('click', () => { view = {...initial}; applyView(); });
+  document.getElementById('fit').addEventListener('click', fit);
   svg.addEventListener('keydown', event => {
-    const steps = {ArrowLeft: [-40, 0], ArrowRight: [40, 0], ArrowUp: [0, -40], ArrowDown: [0, 40]};
-    if (steps[event.key]) {
+    if (event.altKey && arrowSteps[event.key] && event.target.closest('.node')) return;
+    if (arrowSteps[event.key]) {
       event.preventDefault();
-      view.x += steps[event.key][0]; view.y += steps[event.key][1]; applyView();
+      view.x += arrowSteps[event.key][0]; view.y += arrowSteps[event.key][1]; applyView();
     } else if (event.key === '+' || event.key === '=') { event.preventDefault(); zoom(0.8); }
     else if (event.key === '-') { event.preventDefault(); zoom(1.25); }
-    else if (event.key === '0') { event.preventDefault(); view = {...initial}; applyView(); }
+    else if (event.key === '0') { event.preventDefault(); fit(); }
   });
+  const point = event => {
+    const p = svg.createSVGPoint();
+    p.x = event.clientX; p.y = event.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  };
   let drag = null;
   svg.addEventListener('pointerdown', event => {
-    if (event.target.closest('.node')) return;
-    drag = {x: event.clientX, y: event.clientY};
-    svg.setPointerCapture(event.pointerId);
+    if (drag || event.button !== 0 || event.isPrimary === false) return;
+    suppressClick = false;
+    const node = event.target.closest('.node');
+    drag = {id: event.pointerId, name: node ? nodeEntities.get(node).name : null,
+      capture: node || svg, x: event.clientX, y: event.clientY, moved: false};
+    drag.capture.setPointerCapture(event.pointerId);
   });
   svg.addEventListener('pointermove', event => {
-    if (!drag) return;
-    const box = svg.getBoundingClientRect();
-    view.x -= (event.clientX - drag.x) * view.w / box.width;
-    view.y -= (event.clientY - drag.y) * view.h / box.height;
-    drag = {x: event.clientX, y: event.clientY};
-    applyView();
+    if (!drag || event.pointerId !== drag.id) return;
+    if (drag.name && !drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
+    const now = point(event);
+    const before = point({clientX: drag.x, clientY: drag.y});
+    if (drag.name) {
+      drag.moved = true;
+      moveNode(drag.name, now.x - before.x, now.y - before.y);
+    } else {
+      view.x -= now.x - before.x;
+      view.y -= now.y - before.y;
+      applyView();
+    }
+    drag.x = event.clientX; drag.y = event.clientY;
   });
-  svg.addEventListener('pointerup', () => { drag = null; });
-  svg.addEventListener('lostpointercapture', () => { drag = null; });
+  const endDrag = event => {
+    if (!drag || event.pointerId !== drag.id) return;
+    suppressClick = event.type === 'pointerup' && drag.name && drag.moved;
+    const capture = drag.capture;
+    drag = null;
+    if (capture.hasPointerCapture(event.pointerId)) capture.releasePointerCapture(event.pointerId);
+  };
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
+  svg.addEventListener('lostpointercapture', endDrag);
   const section = title => { const s = html('section', globals); html('h2', s, title); return s; };
   const invariants = section('Model invariants');
   values(invariants, 'Rules', model.invariants, i => `${i.id}: ${i.statement}`);

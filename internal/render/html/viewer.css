@@ -7,12 +7,13 @@ main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(19rem, 1fr); 
 .graph-panel, aside, #globals section { background: white; border: 1px solid #c6d1de; border-radius: .5rem; padding: 1rem; }
 .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 input { min-width: 12rem; flex: 1; padding: .5rem; }
-button { cursor: pointer; padding: .4rem .7rem; }
-button:focus-visible, input:focus-visible, svg:focus-visible, .node:focus-visible { outline: 3px solid #e09c00; outline-offset: 2px; }
+button, select { cursor: pointer; padding: .4rem .7rem; }
+button:focus-visible, select:focus-visible, input:focus-visible, svg:focus-visible, .node:focus-visible { outline: 3px solid #e09c00; outline-offset: 2px; }
 #help { font-size: .85rem; }
 #graph { width: 100%; height: min(65vh, 700px); min-height: 350px; border: 1px solid #c6d1de; background: #fbfcfe; touch-action: none; cursor: grab; }
 #graph:active { cursor: grabbing; }
-.node { cursor: pointer; }
+.node { cursor: grab; }
+.node:active { cursor: grabbing; }
 .node rect { fill: #e4f0ff; stroke: #23609b; stroke-width: 2; }
 .node.external rect { fill: #f2f2f2; stroke-dasharray: 4 3; }
 .node.derived rect { fill: #ecf6e7; }

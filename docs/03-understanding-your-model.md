@@ -19,8 +19,12 @@ files:
 Commit both. The Markdown is generated from the YAML; change the YAML (via the
 agent) and re-render instead of editing the Markdown. For interactive exploration,
 `modelith render --format html model.modelith.yaml` also creates a self-contained
-`model.modelith.html` you can open offline. The [CLI reference](./07-cli.md#modelith-render)
-describes its output options. A model [vendored from another
+`model.modelith.html` you can open offline. Its graph starts in a grid; you can
+arrange a top-to-bottom or left-to-right flow, then move individual entities.
+These adjustments are for exploration: **Fit view** keeps your positions,
+while **Arrange** or a reload resets them. The
+[CLI reference](./07-cli.md#modelith-render) describes its controls and output
+options. A model [vendored from another
 repository](./10-vendoring.md) is a copy with different rendering obligations.
 
 ## Model contents

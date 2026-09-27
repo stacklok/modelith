@@ -61,6 +61,15 @@ alongside the input (`model.modelith.yaml` → `model.modelith.md`). With
 viewer with searchable entities, relationships, details, and model-wide
 sections. Open that file directly in a browser; it needs no server or assets.
 
+The viewer starts in **Grid** layout. Select **Flow down** or **Flow right** and
+click **Arrange** to lay out relationship and is-a links in that direction.
+These layouts use a simple, deterministic layering heuristic; they do not
+minimize every crossing. Drag a node to adjust its position, or focus it and
+press Alt+arrow keys. Click **Fit view** to show the current geometry without
+moving nodes. **Arrange** replaces manual positions; reloading the file also
+restores the initial grid. Positions are not saved. Drag the background or use
+arrow keys to pan, and use the zoom buttons or + and − to zoom. Press 0 to fit.
+
 | Flag | Default | Description |
 |---|---|---|
 | `--format` | `markdown` | Output format: `markdown` or `html`. |
