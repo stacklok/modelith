@@ -158,7 +158,7 @@ func ParseSource(raw, ref string) (Source, error) {
 	if err != nil {
 		return Source{}, fmt.Errorf("%q is not a URL: %w", raw, err)
 	}
-	host := normalizeHost(u.Host)
+	host := provenance.NormalizeHost(u.Hostname())
 	// The Raw button hands back this host, so it is an easy thing to paste. The
 	// model is on GitHub and the address just names a different view of it, so
 	// sending the reader off to ask for another host to be supported would be
@@ -647,29 +647,6 @@ func fetchCommit(ctx context.Context, runner Runner, src Source) (string, error)
 // makes the same header refresh cleanly under one command and be refused as a
 // different model's by another.
 func normOrigin(o string) string { return strings.TrimSuffix(o, "/") }
-
-// normalizeHost puts a URL host in the form a comparison uses: a host is
-// case-insensitive, and a browser hands back the "www." form as readily as the
-// bare one, so neither names a different site. ParseSource dispatches on this
-// form, and any other caller reasoning about an origin's host must agree with
-// it — comparing a raw host against "github.com" would refuse "www.github.com"
-// and accept nothing a dispatch would.
-func normalizeHost(host string) string {
-	return strings.TrimPrefix(strings.ToLower(host), "www.")
-}
-
-// originHost reports the host an origin URL names, in the normalized form
-// normalizeHost produces, or "" when the origin does not parse. It is for
-// callers that hold only the recorded origin — refresh, deciding whether it can
-// reach the address it is about to rebuild — and must not guess the host by
-// string inspection.
-func originHost(origin string) string {
-	u, err := url.Parse(strings.TrimSpace(origin))
-	if err != nil {
-		return ""
-	}
-	return normalizeHost(u.Host)
-}
 
 // escapePath escapes each segment of a repository path, leaving the separators
 // alone so the API still sees a path.

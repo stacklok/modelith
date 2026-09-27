@@ -360,7 +360,7 @@ func sourceFromHeader(h *provenance.Header, ref string) (Source, error) {
 			"modelith cannot refresh a copy fetched with %q — this build knows how to fetch %s",
 			h.Fetch, strings.Join(provenance.Methods(), ", "))
 	}
-	switch originHost(h.Origin) {
+	switch provenance.OriginHost(h.Origin) {
 	case "github.com":
 		return ParseSource(fmt.Sprintf("%s/blob/%s/%s", normOrigin(h.Origin), escapePath(ref), escapePath(h.Path)), ref)
 	case "dev.azure.com":

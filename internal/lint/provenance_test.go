@@ -234,6 +234,37 @@ func TestVendored_HeaderProblemsAreReported(t *testing.T) {
 	}
 }
 
+// TestVendored_RefTypeOnAGitHubOriginIsReported pins the repro from the issue
+// that added this check: a GitHub-origin header carrying modelith-ref-type used
+// to lint clean, and `deps update` then dropped the key without saying so. The
+// rule is a provenance finding, so it surfaces through lint and is an error.
+func TestVendored_RefTypeOnAGitHubOriginIsReported(t *testing.T) {
+	t.Parallel()
+
+	files := fakeFiles{".git": ""}
+	// stamp writes a GitHub header with no ref-type; add the key by hand, which
+	// is exactly the header the issue shows.
+	clean := stamp(t, gappy)
+	withKey := strings.Replace(clean, provenance.LinePrefix+"ref: main\n",
+		provenance.LinePrefix+"ref: main\n"+provenance.LinePrefix+"ref-type: tag\n", 1)
+	if withKey == clean {
+		t.Fatal("the test did not add the key")
+	}
+
+	var found bool
+	for _, f := range lintSource(t, withKey, files).Findings {
+		if strings.Contains(f.Message, "recorded only for a dev.azure.com origin") {
+			if f.Severity != SeverityError {
+				t.Errorf("the ref-type finding is a %s, want an error", f.Severity)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a GitHub origin carrying a ref-type was not reported")
+	}
+}
+
 // TestVendored_MalformedHeaderStillSuppressesCompleteness pins that presence,
 // not a clean parse, is what makes a file vendored. A typo in the header would
 // otherwise be buried under gaps in a document this repository does not own.

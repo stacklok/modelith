@@ -301,6 +301,19 @@ func TestParseSource(t *testing.T) {
 			},
 		},
 		{
+			// A port is not part of the host, so an origin that names one
+			// explicitly must dispatch to the same parser as the bare form.
+			// Sharing the normalizer with provenance is what keeps `deps check`
+			// from refusing an origin `lint` accepts.
+			name: "an explicit port on the host is not a different host",
+			raw:  "https://github.com:443/acme/billing/blob/main/docs/payments.modelith.yaml",
+			want: Source{
+				Host:   HostGitHub,
+				Origin: "https://github.com/acme/billing", Owner: "acme", Repo: "billing",
+				Ref: "main", Path: "docs/payments.modelith.yaml",
+			},
+		},
+		{
 			// url.Parse does not remove dot segments, and escapePath cannot
 			// neutralise a segment that *is* a traversal — it would reach the
 			// API endpoint intact and leave the contents namespace.
@@ -882,6 +895,24 @@ func TestParseSource_ADO(t *testing.T) {
 		{
 			name: "a browser ADO blob URL with GB branch",
 			raw:  adoBlobURL,
+			want: Source{
+				Host:    HostADO,
+				Origin:  "https://dev.azure.com/myorg/myproject/_git/myrepo",
+				Owner:   "myorg",
+				Project: "myproject",
+				Repo:    "myrepo",
+				Ref:     "main",
+				RefType: "branch",
+				Path:    "docs/payments.modelith.yaml",
+			},
+		},
+		{
+			// A port is not part of the host, so this is the same origin as the
+			// bare form above; parseADOSource rebuilds Origin without one. This
+			// is the shape round 2 found `deps check` refusing while `lint`
+			// accepted it.
+			name: "an explicit port on the host is not a different host",
+			raw:  "https://dev.azure.com:443/myorg/myproject/_git/myrepo?path=docs/payments.modelith.yaml&version=GBmain",
 			want: Source{
 				Host:    HostADO,
 				Origin:  "https://dev.azure.com/myorg/myproject/_git/myrepo",
