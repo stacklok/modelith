@@ -110,10 +110,17 @@ behaviour.
 - Pinned by `TestImport_ADO_StampsAVerifiableCopy` and the rest of the
   `TestImport_ADO_*` set (import end to end, the GB/GT/GC prefixes, the `--ref`
   override, and `download=true` on the items request);
-  `TestRefresh_ADOCopyIsFirstClass`, `TestRefresh_ADORepinDropsTheRecordedType`,
-  and `TestRefresh_ADOBareRefreshKeepsTheRecordedType` (refresh dispatch, the
-  repin prefix, and the recorded type); `TestRefresh_RefusesAnUnknownHost` (a
-  host with no transport); `TestExecRunner_KillsTheWholeProcessGroup` and
+  `TestADR_0019_RefTypeIsRecordedOnlyWhereItIsNeeded` (the `ref-type` key is
+  recorded for ADO and omitted for GitHub); `TestRefresh_ADOCopyIsFirstClass`,
+  `TestRefresh_ADORepinRetypesTheRef`,
+  `TestRefresh_ADORepinToACommitTypesItAsACommit`,
+  `TestRefresh_ADOHeaderWithoutRefTypeResolvesIt`, and
+  `TestRefresh_ADOBareRefreshKeepsTheRecordedType` (refresh dispatch, the re-pin
+  behaviour for a tag and for a commit, resolving a header without the key, and
+  the recorded type); `TestRefresh_RefusesAnUnknownHost` (a
+  host with no transport); `TestSurvey_ResolutionAbortsOnUnusableCLI` (the
+  ref-type lookup stops the batch when the CLI is unusable);
+  `TestExecRunner_KillsTheWholeProcessGroup` and
   `TestExecRunner_WaitDelayBoundsAPipeHeldByAStrayChild` (the process
   lifecycle); and the `TestTimeoutRunner_*` and
   `TestSurvey_TimeoutBoundsEachDelegatedCall` sets (the deadline).
