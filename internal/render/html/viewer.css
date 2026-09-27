@@ -22,7 +22,8 @@ button:focus-visible, input:focus-visible, svg:focus-visible, .node:focus-visibl
 .edge.owned { stroke: #225b84; stroke-dasharray: none; }
 .edge.isa { stroke: #673d9e; stroke-width: 3; stroke-dasharray: none; }
 .arrow { fill: #253849; }
-.edge-label { fill: #253849; font-size: 12px; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
+.edge-label { fill: #253849; font-size: 12px; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.edge-label-leader { fill: none; stroke: #667789; stroke-width: 1.5; pointer-events: none; }
 .node-label { fill: #112d48; font-size: 15px; font-weight: 600; }
 small, .muted { color: #526273; }
 aside { overflow-wrap: anywhere; max-height: 75vh; overflow-y: auto; }

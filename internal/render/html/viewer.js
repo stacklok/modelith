@@ -21,9 +21,8 @@
   const positions = new Map(entities.map((entity, i) => [entity.name, {
     x: 40 + (i % columns) * 460, y: rowY[Math.floor(i / columns)]
   }]));
-  const initial = {x: 0, y: 0, w: Math.max(380, columns * 460 + 40),
-    h: Math.max(280, nextY - 90)};
-  let view = {...initial};
+  let initial;
+  let view;
   const html = (tag, parent, text, className) => {
     const element = document.createElement(tag);
     if (text !== undefined) element.textContent = text;
@@ -40,6 +39,7 @@
   const textShape = (parent, value, x, y, className) => {
     const element = shape('text', parent, {x, y, class: className, 'text-anchor': 'middle'});
     element.textContent = value;
+    return element;
   };
   const line = (parent, value) => html('div', parent, value, 'item');
   const heading = (parent, value) => html('h3', parent, value);
@@ -87,6 +87,10 @@
   const edges = shape('g', layer, {'aria-hidden': 'true'});
   const nodes = shape('g', layer, {});
   const labels = shape('g', layer, {'aria-hidden': 'true'});
+  const padding = 4;
+  const expand = box => ({x: box.x - padding, y: box.y - padding, width: box.width + padding * 2, height: box.height + padding * 2});
+  const intersects = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  const pendingLabels = [];
   const pairs = new Map();
   const boundary = (center, dx, dy) => {
     const scale = 1 / Math.max(Math.abs(dx) / 125, Math.abs(dy) / (center.h / 2));
@@ -111,28 +115,69 @@
       const end = boundary(b, c.x - b.x, c.y - b.y);
       shape('path', edges, {d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}`,
         class: `edge ${kind}`, 'marker-end': 'url(#arrow)'});
-      textShape(labels, label, (start.x + 2 * c.x + end.x) / 4,
-        (start.y + 2 * c.y + end.y) / 4 - 8, 'edge-label');
+      pendingLabels.push({label, anchor: {x: (start.x + 2 * c.x + end.x) / 4, y: (start.y + 2 * c.y + end.y) / 4}, normal: {x: px, y: py}});
     };
     list(entity.relationships).forEach(r => drawEdge(r.entity, `${r.role || '(no role)'} · ${r.cardinality}`, r.ownership === 'owned' ? 'owned' : 'referenced'));
     if (entity.subtypeOf) drawEdge(entity.subtypeOf, 'is-a', 'isa');
   });
+  const renderedNodeShapes = [];
   entities.forEach((entity, i) => {
     const p = positions.get(entity.name);
     const group = shape('g', nodes, {class: `node${entity.external ? ' external' : ''}${entity.derived ? ' derived' : ''}`, role: 'button', tabindex: 0, 'aria-labelledby': `node-title-${i}`});
     nodeEntities.set(group, entity);
     const title = shape('title', group, {id: `node-title-${i}`});
     title.textContent = `${entity.name}${entity.external ? ', external' : ''}${entity.derived ? ', derived' : ''}`;
-    shape('rect', group, {x: p.x, y: p.y, width: 250, height: nodeHeight(entity), rx: 8});
-    textShape(group, entity.name, p.x + 125, p.y + 32, 'node-label');
-    textShape(group, entity.external ? 'external' : entity.derived ? 'derived' : 'entity', p.x + 125, p.y + 54, 'edge-label');
+    renderedNodeShapes.push(shape('rect', group, {x: p.x, y: p.y, width: 250, height: nodeHeight(entity), rx: 8}));
+    renderedNodeShapes.push(textShape(group, entity.name, p.x + 125, p.y + 32, 'node-label'));
+    renderedNodeShapes.push(textShape(group, entity.external ? 'external' : entity.derived ? 'derived' : 'entity', p.x + 125, p.y + 54, 'edge-label'));
     list(entity.relationships).filter(r => r.entity === entity.name).forEach((r, index) =>
-      textShape(group, `${r.role || '(no role)'} · ${r.cardinality}`, p.x + 125, p.y + 76 + index * 20, 'edge-label'));
+      renderedNodeShapes.push(textShape(group, `${r.role || '(no role)'} · ${r.cardinality}`, p.x + 125, p.y + 76 + index * 20, 'edge-label')));
     group.addEventListener('click', () => select(entity.name));
     group.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(entity.name); }
     });
   });
+  const reserved = renderedNodeShapes.map(element => expand(element.getBBox()));
+  const placeLabel = ({label: value, anchor, normal}) => {
+    const label = textShape(labels, value, anchor.x, anchor.y, 'edge-label');
+    const tangent = {x: -normal.y, y: normal.x};
+    const candidates = [[0, 0]];
+    for (let ring = 1; ring <= 10; ring++) {
+      const away = 20 + ring * 28;
+      const along = ring * 18;
+      candidates.push([normal.x * away, normal.y * away], [-normal.x * away, -normal.y * away],
+        [normal.x * away + tangent.x * along, normal.y * away + tangent.y * along],
+        [normal.x * away - tangent.x * along, normal.y * away - tangent.y * along],
+        [-normal.x * away + tangent.x * along, -normal.y * away + tangent.y * along],
+        [-normal.x * away - tangent.x * along, -normal.y * away - tangent.y * along]);
+    }
+    let chosen;
+    for (const [x, y] of candidates) {
+      label.setAttribute('x', anchor.x + x);
+      label.setAttribute('y', anchor.y + y);
+      const box = expand(label.getBBox());
+      if (!reserved.some(other => intersects(box, other))) { chosen = {x: anchor.x + x, y: anchor.y + y, box}; break; }
+    }
+    if (!chosen) {
+      const y = reserved.reduce((max, box) => Math.max(max, box.y + box.height), anchor.y) + 28;
+      label.setAttribute('x', anchor.x);
+      label.setAttribute('y', y);
+      chosen = {x: anchor.x, y, box: expand(label.getBBox())};
+    }
+    reserved.push(chosen.box);
+    if (Math.hypot(chosen.x - anchor.x, chosen.y - anchor.y) > 24) {
+      const leader = shape('path', labels, {d: `M ${anchor.x} ${anchor.y} L ${chosen.x} ${chosen.y}`, class: 'edge-label-leader'});
+      labels.insertBefore(leader, label);
+    }
+  };
+  pendingLabels.forEach(placeLabel);
+  const minX = Math.min(0, ...reserved.map(box => box.x));
+  const minY = Math.min(0, ...reserved.map(box => box.y));
+  const maxX = Math.max(0, ...reserved.map(box => box.x + box.width));
+  const maxY = Math.max(0, ...reserved.map(box => box.y + box.height));
+  initial = {x: minX, y: minY, w: Math.max(columns * 460 + 40, maxX - minX + 20),
+    h: Math.max(280, nextY - 90, maxY - minY + 20)};
+  view = {...initial};
   const search = document.getElementById('search');
   search.addEventListener('input', () => {
     const query = search.value.toLocaleLowerCase();
