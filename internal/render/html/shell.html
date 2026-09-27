@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Domain model viewer</title>
+<style>
+/* VIEWER_CSS */
+</style>
+</head>
+<body>
+<header><h1 id="title">Domain model</h1><p id="description"></p></header>
+<main>
+<section aria-label="Entity graph" class="graph-panel">
+<div class="toolbar"><label for="search">Find entities</label><input id="search" type="search" autocomplete="off" placeholder="Filter by name"><button id="zoom-in" type="button" aria-label="Zoom in">+</button><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="reset" type="button">Reset view</button></div>
+<p id="help">Select an entity with click, Enter, or Space. Drag the canvas to pan; use arrow keys to pan and + or − to zoom.</p>
+<svg id="graph" role="group" aria-label="Entity relationship graph" aria-describedby="help" tabindex="0"><g id="viewport"></g></svg>
+<p>Arrows point from source to target · solid: owned · dashed: referenced · purple: is-a · dotted outline: external. Self-relationships are listed on nodes and in entity details.</p>
+</section>
+<aside id="details" aria-live="polite"><h2>Entity details</h2><p>Select an entity in the graph.</p></aside>
+</main>
+<section id="globals" aria-label="Model-wide definitions"></section>
+<script id="model-data" type="application/json">VIEWER_JSON_PAYLOAD</script>
+<script>
+/* VIEWER_JS */
+</script>
+</body>
+</html>

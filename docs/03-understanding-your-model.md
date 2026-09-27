@@ -1,7 +1,7 @@
 ---
 sidebar_position: 3
 title: Understanding Your Model
-description: "What the agent produces: the YAML's core concepts, backtick convention, and two files you commit."
+description: "What the agent produces: canonical YAML, rendered Markdown, and an optional offline viewer."
 ---
 
 # Understanding Your Model
@@ -16,8 +16,11 @@ files:
   diagram). This is the easiest-to-read form; people and agents read it
   directly, and CI fails if it drifts from the YAML.
 
-Commit both. The Markdown is generated from the YAML — never hand-edit it; change
-the YAML (via the agent) and re-render. A model [vendored from another
+Commit both. The Markdown is generated from the YAML; change the YAML (via the
+agent) and re-render instead of editing the Markdown. For interactive exploration,
+`modelith render --format html model.modelith.yaml` also creates a self-contained
+`model.modelith.html` you can open offline. The [CLI reference](./07-cli.md#modelith-render)
+describes its output options. A model [vendored from another
 repository](./10-vendoring.md) is a copy with different rendering obligations.
 
 ## Model contents

@@ -1,15 +1,15 @@
 ---
 sidebar_position: 7
 title: The modelith CLI
-description: Lint and render domain models from the command line.
+description: Lint domain models and render Markdown or offline HTML from the command line.
 ---
 
 # The `modelith` CLI
 
-`modelith` validates domain-model YAML and renders it to Markdown. Use it directly
-when you want to lint a model, regenerate its committed Markdown, or inspect the
-schema. The [authoring agent](./02-getting-started.md) and CI use the same
-commands.
+`modelith` validates domain-model YAML and renders Markdown or a self-contained
+HTML viewer. Use it directly when you want to lint a model, regenerate its
+committed Markdown, explore entities in a browser, or inspect the schema. The
+[authoring agent](./02-getting-started.md) and CI use the same commands.
 
 ## Installation
 
@@ -55,30 +55,36 @@ modelith lint --completeness error --format json model.modelith.yaml
 modelith render <file>
 ```
 
-Renders the model to a single Markdown document with an embedded Mermaid
-`erDiagram`. By default it writes alongside the input (`model.modelith.yaml` →
-`model.modelith.md`).
+Renders Markdown with an embedded Mermaid `erDiagram` by default, writing
+alongside the input (`model.modelith.yaml` → `model.modelith.md`). With
+`--format html`, it writes `model.modelith.html`: a self-contained, offline
+viewer with searchable entities, relationships, details, and model-wide
+sections. Open that file directly in a browser; it needs no server or assets.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--out`, `-o` | input with `.md` extension | Output path (the input's `.yaml`/`.yml` replaced with `.md`). |
+| `--format` | `markdown` | Output format: `markdown` or `html`. |
+| `--out`, `-o` | input with `.md` or `.html` extension | Output path (the input's final `.yaml`/`.yml` replaced with the selected extension). |
 | `--stdout` | `false` | Write to stdout instead of a file. |
 | `--check` | `false` | Verify the committed output is up to date; non-zero exit on drift. |
 
 `--stdout` cannot be combined with `--out` or `--check`.
 
-If the model has [`imports`](./06-schema-reference.md#imports), the rendered
-links to them are relative to wherever `-o` writes — `-o` a different
-directory than the source and they still resolve, as long as the imported
-model is rendered to *its* default location too. `--stdout` has no output file
-to relativize against, so its links stay relative to the source.
+For Markdown, if the model has [`imports`](./06-schema-reference.md#imports),
+the rendered links to them are relative to wherever `-o` writes. They resolve
+when the imported model is rendered to *its* default location too. `--stdout`
+has no output file to relativize against, so its links stay relative to the
+source. The HTML viewer shows qualified references as external nodes without
+loading imported definitions.
 
 The committed Markdown is the day-to-day read. `--check` is the CI gate that
 keeps it honest:
 
 ```sh
-modelith render model.modelith.yaml          # regenerate
-modelith render --check model.modelith.yaml  # fail if model.modelith.md is stale
+modelith render model.modelith.yaml                 # regenerate Markdown
+modelith render --check model.modelith.yaml         # fail if model.modelith.md is stale
+modelith render --format html model.modelith.yaml   # write model.modelith.html
+modelith render --format html --stdout model.modelith.yaml > viewer.html
 ```
 
 ## `modelith schema`
