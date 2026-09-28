@@ -61,7 +61,12 @@ alongside the input (`model.modelith.yaml` → `model.modelith.md`). With
 viewer with searchable entities, relationships, details, and model-wide
 sections. Open that file directly in a browser; it needs no server or assets.
 
-The viewer starts in **Grid** layout. Select **Flow down** or **Flow right** and
+The viewer starts in **Grid** layout. Its model-wide definitions appear below the graph in
+**Invariants**, **Enums**, **Glossary**, **Scenarios**, and **Imports** tabs. The first
+nonempty tab opens by default; use Left/Right arrows (or Home/End) to switch tabs,
+then Tab into the selected panel to read its full-width, wrapped content.
+
+Select **Flow down** or **Flow right** and
 click **Arrange** to lay out relationship and is-a links in that direction.
 These layouts use a simple, deterministic layering heuristic; they do not
 minimize every crossing. Drag a node to adjust its position, or focus it and

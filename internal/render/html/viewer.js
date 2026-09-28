@@ -490,16 +490,110 @@
   svg.addEventListener('pointerup', endDrag);
   svg.addEventListener('pointercancel', endDrag);
   svg.addEventListener('lostpointercapture', endDrag);
-  const section = title => { const s = html('section', globals); html('h2', s, title); return s; };
-  const invariants = section('Model invariants');
-  values(invariants, 'Rules', model.invariants, i => `${i.id}: ${i.statement}`);
-  const enums = section('Enums');
-  values(enums, 'Types', model.enums, e => `${e.name}${e.description ? ' · ' + e.description : ''}: ${e.values.map(v => v.name + (v.definition ? ' (' + v.definition + ')' : '')).join(', ')}`);
-  const glossary = section('Glossary');
-  values(glossary, 'Terms', model.glossary, t => `${t.name}: ${t.definition}`);
-  const scenarios = section('Scenarios');
-  values(scenarios, 'Narratives', model.scenarios, s => `${s.name}${s.description ? ' · ' + s.description : ''}\nActors: ${s.actors?.join(', ') || 'none'}\nSteps: ${s.steps?.join(' → ') || 'none'}\nInvariants touched: ${s.invariants_touched?.join(', ') || 'none'}`);
-  const imports = section('Imports');
-  values(imports, 'Sources', model.imports, i => `${i.scope}: ${i.path}`);
+  const globalDefinitions = [
+    {name: 'Invariants', items: list(model.invariants), render: (panel, items) => {
+      if (!items.length) { line(panel, 'No invariants defined.'); return; }
+      items.forEach(invariant => {
+        const record = html('article', panel, undefined, 'global-record');
+        heading(record, invariant.id);
+        line(record, invariant.statement);
+      });
+    }},
+    {name: 'Enums', items: list(model.enums), render: (panel, items) => {
+      if (!items.length) { line(panel, 'No enums defined.'); return; }
+      items.forEach(enumType => {
+        const record = html('article', panel, undefined, 'global-record');
+        heading(record, enumType.name);
+        line(record, enumType.description || 'No description.');
+        if (!list(enumType.values).length) { line(record, 'No values defined.'); return; }
+        const definitions = html('dl', record, undefined, 'enum-values');
+        enumType.values.forEach(value => {
+          html('dt', definitions, value.name);
+          html('dd', definitions, value.definition || 'No definition.');
+        });
+      });
+    }},
+    {name: 'Glossary', items: list(model.glossary), render: (panel, items) => {
+      if (!items.length) { line(panel, 'No glossary terms defined.'); return; }
+      const definitions = html('dl', panel, undefined, 'global-definitions');
+      items.forEach(term => {
+        html('dt', definitions, term.name);
+        html('dd', definitions, term.definition);
+      });
+    }},
+    {name: 'Scenarios', items: list(model.scenarios), render: (panel, items) => {
+      if (!items.length) { line(panel, 'No scenarios defined.'); return; }
+      items.forEach(scenario => {
+        const record = html('article', panel, undefined, 'global-record');
+        heading(record, scenario.name);
+        line(record, scenario.description || 'No description.');
+        values(record, 'Actors', scenario.actors, actor => actor);
+        html('h4', record, 'Steps');
+        if (!list(scenario.steps).length) line(record, 'No steps defined.');
+        else {
+          const steps = html('ol', record);
+          list(scenario.steps).forEach(step => html('li', steps, step));
+        }
+        values(record, 'Invariants touched', scenario.invariants_touched, invariant => invariant);
+      });
+    }},
+    {name: 'Imports', items: list(model.imports), render: (panel, items) => {
+      if (!items.length) { line(panel, 'No imports defined.'); return; }
+      const definitions = html('dl', panel, undefined, 'global-definitions');
+      items.forEach(item => {
+        html('dt', definitions, item.scope);
+        html('dd', definitions, item.path);
+      });
+    }}
+  ];
+  const tablist = html('div', globals, undefined, 'global-tabs');
+  tablist.setAttribute('role', 'tablist');
+  tablist.setAttribute('aria-label', 'Model-wide definitions');
+  const panels = html('div', globals, undefined, 'global-panels');
+  const tabs = [];
+  const tabPanels = [];
+  const setActiveGlobal = index => {
+    tabs.forEach((tab, tabIndex) => {
+      const active = tabIndex === index;
+      tab.setAttribute('aria-selected', String(active));
+      tab.setAttribute('tabindex', active ? '0' : '-1');
+      const panel = tabPanels[tabIndex];
+      panel.hidden = !active;
+      panel.setAttribute('tabindex', active ? '0' : '-1');
+    });
+  };
+  const focusGlobalTab = index => {
+    setActiveGlobal(index);
+    tabs[index].focus({preventScroll: true});
+    tabs[index].scrollIntoView?.({block: 'nearest', inline: 'nearest'});
+  };
+  globalDefinitions.forEach((definition, index) => {
+    const tabID = `globals-tab-${index}`;
+    const panelID = `globals-panel-${index}`;
+    const tab = html('button', tablist, `${definition.name} (${definition.items.length})`, 'global-tab');
+    tab.setAttribute('type', 'button');
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('id', tabID);
+    tab.setAttribute('aria-controls', panelID);
+    const panel = html('section', panels, undefined, 'globals-panel');
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('id', panelID);
+    panel.setAttribute('aria-labelledby', tabID);
+    definition.render(panel, definition.items);
+    tab.addEventListener('click', () => setActiveGlobal(index));
+    tab.addEventListener('keydown', event => {
+      let next = index;
+      if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+      else if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      focusGlobalTab(next);
+    });
+    tabs.push(tab);
+    tabPanels.push(panel);
+  });
+  setActiveGlobal(Math.max(0, globalDefinitions.findIndex(definition => definition.items.length)));
   applyView();
 })();

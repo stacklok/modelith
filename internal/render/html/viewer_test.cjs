@@ -30,7 +30,11 @@ class Element {
   }
   getAttribute(key) { return this.attributes[key]; }
   addEventListener(name, handler) { this.handlers[name] = handler; }
-  fire(name, props = {}) { this.handlers[name]({...props, type: name, target: props.target || this, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }}); }
+  fire(name, props = {}) {
+    const event = {...props, type: name, target: props.target || this, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }};
+    this.handlers[name](event);
+    return event;
+  }
   querySelectorAll(selector) {
     return this.children.flatMap(child => [child, ...child.querySelectorAll(selector)])
       .filter(child => child.classList.contains(selector.slice(1)));
@@ -54,7 +58,8 @@ class Element {
     }
     return {x: 0, y: 0, width: 0, height: 0};
   }
-  focus() { this.focused = true; }
+  focus(options) { this.focused = true; this.focusOptions = options; }
+  scrollIntoView(options) { this.scrollOptions = options; }
   setPointerCapture(id) { this.capture = id; }
   hasPointerCapture(id) { return this.capture === id; }
   releasePointerCapture(id) { if (this.capture === id) this.capture = undefined; }
@@ -182,13 +187,107 @@ const pointer = (layout, name, x, y, id = 1) => {
   return target;
 };
 
-test('empty model initializes controls and global empty states', () => {
+test('empty model initializes controls and accessible empty global tabs', () => {
   const {ids, nodes, details, all} = start({entities: []});
+  const tabs = all(ids.globals).filter(e => e.attributes.role === 'tab');
+  const panels = all(ids.globals).filter(e => e.attributes.role === 'tabpanel');
   assert.equal(nodes().length, 0);
   assert.equal(ids.graph.attributes.viewBox, '0 0 500 280');
-  assert.equal(all(ids.globals).filter(e => e.textContent === 'None').length, 5);
+  assert.deepEqual(tabs.map(tab => tab.textContent), ['Invariants (0)', 'Enums (0)', 'Glossary (0)', 'Scenarios (0)', 'Imports (0)']);
+  assert.equal(tabs[0].attributes['aria-selected'], 'true');
+  assert.deepEqual(tabs.map(tab => tab.attributes.tabindex), ['0', '-1', '-1', '-1', '-1']);
+  assert.deepEqual(panels.map(panel => panel.hidden), [false, true, true, true, true]);
+  assert.deepEqual(panels.map(panel => panel.attributes.tabindex), ['0', '-1', '-1', '-1', '-1']);
+  assert.deepEqual(panels.map(panel => all(panel).filter(e => e.tag === 'p').map(e => e.textContent)), [
+    ['No invariants defined.'], ['No enums defined.'], ['No glossary terms defined.'], ['No scenarios defined.'], ['No imports defined.']
+  ]);
   assert.deepEqual(details(), ['']);
 });
+
+
+test('global tabs select, wrap, and preserve graph state', () => {
+  const layout = start({entities: [{name: 'A'}, {name: 'B'}], enums: [{name: 'State', values: [{name: 'open'}]}], scenarios: [{name: 'Create', steps: ['Start', 'Finish']}]});
+  const {ids, all, nodes} = layout;
+  const tabs = all(ids.globals).filter(e => e.attributes.role === 'tab');
+  const panels = all(ids.globals).filter(e => e.attributes.role === 'tabpanel');
+  const view = ids.graph.attributes.viewBox;
+  nodes()[0].fire('click');
+  ids.search.value = 'a'; ids.search.fire('input');
+  ids.theme.value = 'dark'; ids.theme.fire('change');
+  assert.deepEqual(tabs.map(tab => tab.textContent), ['Invariants (0)', 'Enums (1)', 'Glossary (0)', 'Scenarios (1)', 'Imports (0)']);
+  assert.equal(tabs[1].attributes['aria-selected'], 'true', 'first nonempty category starts selected');
+  assert.equal(panels[1].attributes['aria-labelledby'], tabs[1].attributes.id);
+  assert.equal(tabs[1].attributes['aria-controls'], panels[1].attributes.id);
+  assert.deepEqual(panels.map(panel => panel.hidden), [true, false, true, true, true]);
+  tabs[3].fire('click');
+  assert.deepEqual(tabs.map(tab => tab.attributes['aria-selected']), ['false', 'false', 'false', 'true', 'false']);
+  assert.deepEqual(panels.map(panel => panel.hidden), [true, true, true, false, true]);
+  assert.deepEqual(tabs.map(tab => tab.attributes.tabindex), ['-1', '-1', '-1', '0', '-1']);
+  const left = tabs[3].fire('keydown', {key: 'ArrowLeft'});
+  assert.equal(left.prevented, true);
+  assert.equal(tabs[2].focused, true);
+  assert.equal(tabs[2].focusOptions.preventScroll, true);
+  assert.equal(tabs[2].scrollOptions.block, 'nearest');
+  assert.equal(tabs[2].scrollOptions.inline, 'nearest');
+  assert.equal(tabs[2].attributes['aria-selected'], 'true');
+  tabs[2].fire('keydown', {key: 'ArrowLeft'});
+  assert.equal(tabs[1].attributes['aria-selected'], 'true');
+  tabs[1].fire('keydown', {key: 'ArrowLeft'});
+  assert.equal(tabs[0].attributes['aria-selected'], 'true');
+  tabs[0].fire('keydown', {key: 'ArrowLeft'});
+  assert.equal(tabs[4].attributes['aria-selected'], 'true', 'left wraps');
+  tabs[4].fire('keydown', {key: 'ArrowRight'});
+  assert.equal(tabs[0].attributes['aria-selected'], 'true', 'right wraps');
+  tabs[0].fire('keydown', {key: 'End'});
+  assert.equal(tabs[4].attributes['aria-selected'], 'true');
+  tabs[4].fire('keydown', {key: 'Home'});
+  assert.equal(tabs[0].attributes['aria-selected'], 'true');
+  const tab = tabs[0].fire('keydown', {key: 'Tab'});
+  assert.equal(tab.prevented, undefined);
+  assert.equal(panels[1].attributes.tabindex, '-1', 'inactive panel is not focusable');
+  assert.equal(ids.graph.attributes.viewBox, view);
+  assert.equal(nodes()[0].classList.contains('selected'), true);
+  assert.equal(ids.search.value, 'a');
+  assert.equal(ids.documentElement.dataset.theme, 'dark');
+  assert.match(css, /\.global-tabs \{[^}]*overflow-x: auto;[^}]*scrollbar-gutter: stable;/);
+  assert.match(css, /\.globals-panel \{ width: 100%; min-width: 0; overflow-wrap: anywhere;/);
+  assert.match(css, /\.globals-panel > \* \{ max-width: 72ch; \}/);
+});
+
+test('global tabs retain structured model text exactly once and in order', () => {
+  const hostile = '<unsafe & text>';
+  const {ids, all} = start({entities: [],
+    invariants: [{id: 'inventory-nonnegative', statement: hostile}, {id: 'shipment-address', statement: 'Shipment has an address.'}],
+    enums: [
+      {name: 'DeliveryState', description: 'Lifecycle state.', values: [{name: 'Pending', definition: 'Awaiting fulfilment.'}, {name: 'Shipped', definition: ''}]},
+      {name: 'EmptyDescription', description: '', values: [{name: 'Unknown', definition: 'Not classified.'}]}
+    ],
+    glossary: [{name: 'consignment', definition: 'A shipment of goods.'}, {name: 'handoff', definition: 'Transfer of custody.'}],
+    imports: [{scope: 'carrier', path: 'carrier.modelith.yaml'}, {scope: 'warehouse', path: 'warehouse.modelith.yaml'}],
+    scenarios: [{name: 'Ship order', description: 'Dispatch an accepted order.', actors: ['Warehouse', 'Carrier'], steps: ['Reserve stock', 'Create consignment', 'Notify carrier'], invariants_touched: ['inventory-nonnegative', 'shipment-address']}]
+  });
+  const fields = panel => all(panel).filter(e => ['h3', 'h4', 'p', 'dt', 'dd', 'li'].includes(e.tag)).map(e => [e.tag, e.textContent]);
+  const panel = index => all(ids.globals).find(e => e.attributes.id === `globals-panel-${index}`);
+  assert.deepEqual(fields(panel(0)), [
+    ['h3', 'inventory-nonnegative'], ['p', hostile], ['h3', 'shipment-address'], ['p', 'Shipment has an address.']
+  ]);
+  assert.deepEqual(fields(panel(1)), [
+    ['h3', 'DeliveryState'], ['p', 'Lifecycle state.'], ['dt', 'Pending'], ['dd', 'Awaiting fulfilment.'], ['dt', 'Shipped'], ['dd', 'No definition.'],
+    ['h3', 'EmptyDescription'], ['p', 'No description.'], ['dt', 'Unknown'], ['dd', 'Not classified.']
+  ]);
+  assert.deepEqual(fields(panel(2)), [
+    ['dt', 'consignment'], ['dd', 'A shipment of goods.'], ['dt', 'handoff'], ['dd', 'Transfer of custody.']
+  ]);
+  assert.deepEqual(fields(panel(3)), [
+    ['h3', 'Ship order'], ['p', 'Dispatch an accepted order.'], ['h3', 'Actors'], ['li', 'Warehouse'], ['li', 'Carrier'],
+    ['h4', 'Steps'], ['li', 'Reserve stock'], ['li', 'Create consignment'], ['li', 'Notify carrier'],
+    ['h3', 'Invariants touched'], ['li', 'inventory-nonnegative'], ['li', 'shipment-address']
+  ]);
+  assert.deepEqual(fields(panel(4)), [
+    ['dt', 'carrier'], ['dd', 'carrier.modelith.yaml'], ['dt', 'warehouse'], ['dd', 'warehouse.modelith.yaml']
+  ]);
+});
+
 
 test('populated graph routes directed parallel edges and lists self roles', () => {
   const {ids, nodes, all, details} = start({title: 'Example', entities: [
@@ -371,8 +470,8 @@ test('label measurement is cached per content, not per placement or drag candida
 test('external incoming, global values and hostile text remain text only', () => {
   const hostile = `<img src=x onerror=alert(1)> " ' &`;
   const {ids, nodes, all, details} = start({title: hostile, description: hostile,
-    invariants: [{id: 'i', statement: hostile}], enums: [{name: 'e', values: [{name: hostile}]}],
-    glossary: [{name: hostile, definition: hostile}], scenarios: [{name: hostile}],
+    invariants: [{id: 'i', statement: hostile}], enums: [{name: 'e', description: hostile, values: [{name: hostile, definition: hostile}]}],
+    glossary: [{name: hostile, definition: hostile}], scenarios: [{name: hostile, description: hostile, actors: [hostile], steps: [hostile, 'second'], invariants_touched: [hostile]}],
     imports: [{scope: hostile, path: hostile}], entities: [
       {name: hostile, relationships: [rel('remote.Target', hostile, '1:n')]},
       {name: 'remote.Target', external: true}
@@ -380,6 +479,9 @@ test('external incoming, global values and hostile text remain text only', () =>
   assert.equal(ids.title.textContent, hostile);
   assert.equal(ids.description.textContent, hostile);
   assert.ok(all(ids.globals).some(e => e.textContent.includes(hostile)));
+  const scenarioPanel = all(ids.globals).find(e => e.attributes.id === 'globals-panel-3');
+  assert.deepEqual(all(scenarioPanel).filter(e => e.tag === 'ol').flatMap(e => e.children.map(child => child.textContent)), [hostile, 'second']);
+  assert.ok(all(ids.globals).every(e => e.tag !== 'script' && !Object.values(e.attributes).some(v => v.includes(hostile))));
   assert.ok(nodes()[0].children.some(e => e.tag === 'title' && e.textContent === hostile));
   assert.ok(all(ids.viewport).every(e => !Object.values(e.attributes).some(v => v.includes(hostile))));
   nodes()[1].fire('keydown', {key: ' '});
@@ -705,17 +807,26 @@ test('Escape clears relationship and selection highlighting without clearing sea
   assert.ok(all(ids.viewport).filter(element => element.classList.contains('edge')).every(element => !element.classList.contains('highlight')));
 });
 
-test('label borders meet 3:1 contrast against the canvas in both themes', () => {
+test('label borders and selected tab focus rings meet 3:1 contrast in both themes', () => {
   const luminance = hex => {
+    if (hex.length === 4) hex = `#${[...hex.slice(1)].map(channel => channel + channel).join('')}`;
     const channels = hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255)
       .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
     return .2126 * channels[0] + .7152 * channels[1] + .0722 * channels[2];
   };
   const ratio = (a, b) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
-  const token = selector => css.match(new RegExp(`${selector}[^}]*--canvas: (#[0-9a-f]{6})[^}]*--label-line: (#[0-9a-f]{6})`, 'i'))?.slice(1);
-  for (const [theme, [canvas, border]] of [['light', token(':root \\{')], ['dark', token(':root\\[data-theme="dark"\\] \\{')]])
+  const tokens = selector => {
+    const start = css.indexOf(selector), block = css.slice(start, css.indexOf('}', start));
+    return ['panel', 'ink', 'accent', 'canvas', 'label-line'].map(name => block.match(new RegExp(`--${name}: (#[0-9a-f]{3}(?:[0-9a-f]{3})?)`, 'i'))?.[1]);
+  };
+  for (const [theme, [panel, ink, accent, canvas, border]] of [['light', tokens(':root {')], ['dark', tokens(':root[data-theme="dark"] {')]]) {
     assert.ok(ratio(canvas, border) >= 3, `${theme} label border ratio is ${ratio(canvas, border)}`);
+    assert.ok(ratio(panel, ink) >= 3, `${theme} selected tab outer ring ratio is ${ratio(panel, ink)}`);
+    assert.ok(ratio(accent, panel) >= 3, `${theme} selected tab inset ring ratio is ${ratio(accent, panel)}`);
+  }
   assert.match(css, /\.label-bg \{ fill: var\(--label\); stroke: var\(--label-line\); stroke-width: 1;/);
+  assert.match(css, /\.global-tabs \{[^}]*padding: \.5rem;/);
+  assert.match(css, /\.global-tab\[aria-selected="true"\]:focus-visible \{ outline: 3px solid var\(--ink\); outline-offset: 2px; box-shadow: inset 0 0 0 2px var\(--panel\); \}/);
 });
 
 test('structured details retain modeled fields and hostile values only as text', () => {
