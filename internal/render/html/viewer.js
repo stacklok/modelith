@@ -80,6 +80,33 @@
   const padding = 4;
   const expand = box => ({x: box.x - padding, y: box.y - padding, width: box.width + padding * 2, height: box.height + padding * 2});
   const intersects = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  // Clip the complete segment against both rectangle slabs, including boundary contact.
+  const segmentHits = (a, b, box) => {
+    let enter = 0, exit = 1;
+    for (const [axis, size] of [['x', 'width'], ['y', 'height']]) {
+      const delta = b[axis] - a[axis];
+      if (!delta) {
+        if (a[axis] < box[axis] || a[axis] > box[axis] + box[size]) return false;
+      } else {
+        const near = (box[axis] - a[axis]) / delta;
+        const far = (box[axis] + box[size] - a[axis]) / delta;
+        enter = Math.max(enter, Math.min(near, far));
+        exit = Math.min(exit, Math.max(near, far));
+        if (enter > exit) return false;
+      }
+    }
+    return true;
+  };
+  const labelMeasurements = new Map();
+  const measureLabel = label => {
+    if (!labelMeasurements.has(label.textContent)) {
+      const {x, y, width, height} = label.getBBox();
+      labelMeasurements.set(label.textContent, {x, y, width, height});
+    }
+    return labelMeasurements.get(label.textContent);
+  };
+  const samples = [0.5];
+  for (let step = 1; step <= 9; step++) samples.push((10 - step) / 20, (10 + step) / 20);
   const pairs = new Map();
   const connections = [];
   entities.forEach(entity => {
@@ -204,42 +231,69 @@
       edgePoints.push(start, c, end);
       shape('path', edges, {d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}`,
         class: `edge ${kind}`, 'marker-end': 'url(#arrow)'});
-      pendingLabels.push({label, anchor: {x: (start.x + 2 * c.x + end.x) / 4, y: (start.y + 2 * c.y + end.y) / 4}, normal: {x: px, y: py}});
+      pendingLabels.push({source, target, label, start, c, end});
     });
     const reserved = [...renderedNodes.values()].flatMap(node => node.shapes.map(s => expand(s.getBBox())));
-    const placeLabel = ({label: value, anchor, normal}) => {
-      const label = textShape(labels, value, anchor.x, anchor.y, 'edge-label');
-      const tangent = {x: -normal.y, y: normal.x};
-      const candidates = [[0, 0]];
-      for (let ring = 1; ring <= 10; ring++) {
-        const away = 20 + ring * 28;
-        const along = ring * 18;
-        candidates.push([normal.x * away, normal.y * away], [-normal.x * away, -normal.y * away],
-          [normal.x * away + tangent.x * along, normal.y * away + tangent.y * along],
-          [normal.x * away - tangent.x * along, normal.y * away - tangent.y * along],
-          [-normal.x * away + tangent.x * along, -normal.y * away + tangent.y * along],
-          [-normal.x * away - tangent.x * along, -normal.y * away - tangent.y * along]);
-      }
+    const leaders = [], anchors = [], overflow = [];
+    const placeLabel = ({source, target, label: value, start, c, end}) => {
+      const label = textShape(labels, value, 0, 0, 'edge-label');
+      const measured = measureLabel(label);
+      const visible = samples.map(t => {
+        const anchor = {x: (1-t)**2*start.x + 2*(1-t)*t*c.x + t*t*end.x,
+          y: (1-t)**2*start.y + 2*(1-t)*t*c.y + t*t*end.y};
+        const dx = 2*((1-t)*(c.x-start.x) + t*(end.x-c.x));
+        const dy = 2*((1-t)*(c.y-start.y) + t*(end.y-c.y));
+        const length = Math.hypot(dx, dy);
+        return {anchor, tangent: {x: dx / length, y: dy / length}, length};
+      }).filter(({anchor, length}) => length && !reserved.some(box => segmentHits(anchor, anchor, box)));
       let chosen;
-      for (const [x, y] of candidates) {
-        label.setAttribute('x', anchor.x + x);
-        label.setAttribute('y', anchor.y + y);
-        const box = expand(label.getBBox());
-        if (!reserved.some(other => intersects(box, other))) { chosen = {x: anchor.x + x, y: anchor.y + y, box}; break; }
+      // Try every visible sample at a short offset before considering a longer stem.
+      search: for (const gap of [0, 8, 20, 36]) for (const {anchor, tangent} of visible) {
+        const normal = {x: -tangent.y, y: tangent.x};
+        for (const [across, along] of gap ? [[1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]] : [[0, 0]]) {
+          const length = Math.hypot(across, along) || 1;
+          const direction = {x: (normal.x*across + tangent.x*along) / length,
+            y: (normal.y*across + tangent.y*along) / length};
+          const radius = gap ? 1 / Math.max(Math.abs(direction.x) / (measured.width / 2), Math.abs(direction.y) / (measured.height / 2)) : 0;
+          const center = {x: anchor.x + direction.x*(radius + gap), y: anchor.y + direction.y*(radius + gap)};
+          const box = expand({x: center.x - measured.width / 2, y: center.y - measured.height / 2, width: measured.width, height: measured.height});
+          if (reserved.some(other => intersects(box, other)) || anchors.some(p => segmentHits(p, p, box)) ||
+              leaders.some(leader => segmentHits(leader.a, leader.b, box))) continue;
+          const border = {x: anchor.x + direction.x*gap, y: anchor.y + direction.y*gap};
+          if (gap && reserved.some(other => segmentHits(anchor, border, other))) continue;
+          chosen = {center, box, anchor, border, gap};
+          break search;
+        }
       }
       if (!chosen) {
-        const y = reserved.reduce((max, box) => Math.max(max, box.y + box.height), anchor.y) + 28;
-        label.setAttribute('x', anchor.x);
-        label.setAttribute('y', y);
-        chosen = {x: anchor.x, y, box: expand(label.getBBox())};
+        overflow.push({label, value: `${source} → ${target} · ${value}`});
+        return;
       }
+      label.setAttribute('x', chosen.center.x - measured.x - measured.width / 2);
+      label.setAttribute('y', chosen.center.y - measured.y - measured.height / 2);
       reserved.push(chosen.box);
-      if (Math.hypot(chosen.x - anchor.x, chosen.y - anchor.y) > 24) {
-        const leader = shape('path', labels, {d: `M ${anchor.x} ${anchor.y} L ${chosen.x} ${chosen.y}`, class: 'edge-label-leader'});
+      anchors.push(chosen.anchor);
+      if (chosen.gap) {
+        const {anchor, border} = chosen;
+        const leader = shape('path', labels, {d: `M ${anchor.x} ${anchor.y} L ${border.x} ${border.y}`, class: 'edge-label-leader'});
         labels.insertBefore(leader, label);
+        leaders.push({a: anchor, b: border});
       }
     };
     pendingLabels.forEach(placeLabel);
+    // Reserve overflow below the entire graph, only after all local labels have been placed.
+    const left = reserved.reduce((min, box) => Math.min(min, box.x), Infinity);
+    let bottom = reserved.reduce((max, box) => Math.max(max, box.y + box.height),
+      edgePoints.reduce((max, p) => Math.max(max, p.y), -Infinity)) + 28;
+    overflow.forEach(({label, value}) => {
+      label.textContent = value;
+      const measured = measureLabel(label);
+      label.setAttribute('x', left - measured.x);
+      label.setAttribute('y', bottom - measured.y);
+      const box = expand({x: left, y: bottom, width: measured.width, height: measured.height});
+      reserved.push(box);
+      bottom = box.y + box.height + 20;
+    });
     reservations = reserved.concat(edgePoints.map(p => ({x: p.x, y: p.y, width: 0, height: 0})));
   };
   let frame = 0;

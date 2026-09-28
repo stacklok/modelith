@@ -15,7 +15,7 @@
 <div class="toolbar"><label for="search">Find entities</label><input id="search" type="search" autocomplete="off" placeholder="Filter by name"><label for="layout">Layout</label><select id="layout"><option value="grid">Grid</option><option value="flow-down">Flow down</option><option value="flow-right">Flow right</option></select><button id="arrange" type="button">Arrange</button><button id="zoom-in" type="button" aria-label="Zoom in">+</button><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="fit" type="button">Fit view</button></div>
 <p id="help">Click a node or press Enter or Space to see details. Drag nodes to move them; focus a node and press Alt+arrow keys to move it by 40 units. Drag the canvas or use arrow keys to pan; + and − zoom, 0 fits the view. Choose a layout and press Arrange to replace manual positions. Moves last until Arrange or reload; they are not saved.</p>
 <svg id="graph" role="group" aria-label="Entity relationship graph" aria-describedby="help" tabindex="0"><g id="viewport"></g></svg>
-<p>Arrows point from source to target · solid: owned · dashed: referenced · purple: is-a · dotted outline: external. Self-relationships are listed on nodes and in entity details.</p>
+<p>Arrows point from source to target · solid: owned · dashed: referenced · purple: is-a · dotted outline: external. Self-relationships are listed on nodes and in entity details. When an edge is obscured or has no clear short label connection, labels below the graph read Source → Target · role · cardinality, without a stem.</p>
 </section>
 <aside id="details" aria-live="polite"><h2>Entity details</h2><p>Select an entity in the graph.</p></aside>
 </main>

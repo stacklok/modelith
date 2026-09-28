@@ -17,6 +17,7 @@ class Element {
   }
   appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
   insertBefore(child, reference) {
+    if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1);
     child.parentNode = this;
     this.children.splice(this.children.indexOf(reference), 0, child);
     return child;
@@ -57,25 +58,51 @@ class Element {
   hasPointerCapture(id) { return this.capture === id; }
   releasePointerCapture(id) { if (this.capture === id) this.capture = undefined; }
 }
-function start(model, measure) {
+function start(model, measure, source = script, globals = {}) {
   const ids = Object.fromEntries(['graph', 'viewport', 'details', 'globals', 'title', 'description',
     'search', 'zoom-in', 'zoom-out', 'layout', 'arrange', 'fit'].map(id => [id, new Element(id, measure)]));
   ids.layout.value = 'grid';
   const frames = new Map();
   let nextFrame = 0;
   ids['model-data'] = {textContent: JSON.stringify(model)};
-  vm.runInNewContext(script, {requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
+  vm.runInNewContext(source, {requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
     cancelAnimationFrame: id => frames.delete(id), document: {
     getElementById: id => ids[id],
     createElement: tag => new Element(tag, measure),
     createElementNS: (ns, tag) => new Element(tag, measure)
-  }});
+  }, ...globals});
   const all = root => [root, ...root.children.flatMap(all)];
   const nodes = () => ids.viewport.querySelectorAll('.node');
   const details = () => all(ids.details).map(e => e.textContent);
   return {ids, all, nodes, details, flush: () => { for (const [id, callback] of frames) { frames.delete(id); callback(); } }};
 }
+function productionSegmentHits() {
+  let segmentHits;
+  const source = script.replace('  const labelMeasurements = new Map();', '  globalThis.__captureSegmentHits(segmentHits);\n  const labelMeasurements = new Map();');
+  assert.notEqual(source, script, 'instrumentation marker must match production helper boundary');
+  start({entities: []}, undefined, source, {__captureSegmentHits: helper => { segmentHits = helper; }});
+  return segmentHits;
+}
 const rel = (entity, role, cardinality, ownership = 'referenced') => ({entity, role, cardinality, ownership});
+
+test('segmentHits clips horizontal, vertical, point, boundary, reverse and diagonal segments', () => {
+  const segmentHits = productionSegmentHits();
+  const box = {x: 10, y: 10, width: 10, height: 10};
+  const cases = [
+    ['horizontal intersects', {x: 0, y: 15}, {x: 30, y: 15}, true],
+    ['horizontal misses', {x: 0, y: 5}, {x: 30, y: 5}, false],
+    ['vertical intersects', {x: 15, y: 0}, {x: 15, y: 30}, true],
+    ['vertical misses', {x: 5, y: 0}, {x: 5, y: 30}, false],
+    ['point inside', {x: 15, y: 15}, {x: 15, y: 15}, true],
+    ['point outside', {x: 5, y: 5}, {x: 5, y: 5}, false],
+    ['point on boundary', {x: 10, y: 15}, {x: 10, y: 15}, true],
+    ['endpoint touching', {x: 0, y: 15}, {x: 10, y: 15}, true],
+    ['reverse direction', {x: 30, y: 15}, {x: 0, y: 15}, true],
+    ['diagonal misses', {x: 0, y: 0}, {x: 5, y: 5}, false],
+    ['diagonal hits', {x: 0, y: 0}, {x: 30, y: 30}, true]
+  ];
+  for (const [name, a, b, expected] of cases) assert.equal(segmentHits(a, b, box), expected, name);
+});
 const intersects = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 const nodeGeometry = layout => layout.nodes().flatMap(node => node.children
   .filter(child => child.tag === 'rect' || child.tag === 'text').map(child => child.getBBox()));
@@ -84,6 +111,51 @@ const rect = node => node.children.find(child => child.tag === 'rect');
 const nodeX = node => Number(rect(node).attributes.x);
 const nodeY = node => Number(rect(node).attributes.y);
 const edgePaths = layout => layout.all(layout.ids.viewport).filter(e => e.classList.contains('edge'));
+const pathNumbers = element => element.attributes.d.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi).map(Number);
+const contains = (box, x, y) => x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+// Independent segment/rectangle oracle: intersect the four sides, including boundary contact.
+const hitsBox = ([ax, ay, bx, by], box) => {
+  if (contains(box, ax, ay) || contains(box, bx, by)) return true;
+  for (const x of [box.x, box.x + box.width]) {
+    const t = (x - ax) / (bx - ax);
+    if (t >= 0 && t <= 1 && ay + t * (by - ay) >= box.y && ay + t * (by - ay) <= box.y + box.height) return true;
+  }
+  for (const y of [box.y, box.y + box.height]) {
+    const t = (y - ay) / (by - ay);
+    if (t >= 0 && t <= 1 && ax + t * (bx - ax) >= box.x && ax + t * (bx - ax) <= box.x + box.width) return true;
+  }
+  return false;
+};
+const assertLabelGeometry = layout => {
+  const children = labelLayer(layout).children;
+  const labels = children.filter(e => e.classList.contains('edge-label'));
+  const obstacles = nodeGeometry(layout);
+  const paths = edgePaths(layout);
+  assert.equal(labels.length, paths.length);
+  labels.forEach((label, i) => {
+    const box = label.getBBox();
+    assert.ok(obstacles.every(other => !intersects(box, other)), `label ${i} overlaps node/text`);
+    labels.forEach((other, j) => { if (i !== j) assert.ok(!intersects(box, other.getBBox()), `labels ${i}/${j} overlap`); });
+    const leader = children[children.indexOf(label) - 1];
+    const hasLeader = leader?.classList.contains('edge-label-leader');
+    if (!hasLeader && label.textContent.includes(' → ')) return;
+    const segment = hasLeader ? pathNumbers(leader) : [box.x + box.width / 2, box.y + box.height / 2];
+    const [ax, ay, bx, by] = segment;
+    const [sx, sy, cx, cy, ex, ey] = pathNumbers(paths[i]);
+    const samples = Array.from({length: 19}, (_, n) => (n + 1) / 20);
+    assert.ok(samples.some(t => Math.hypot(ax - ((1-t)**2*sx + 2*(1-t)*t*cx + t*t*ex),
+      ay - ((1-t)**2*sy + 2*(1-t)*t*cy + t*t*ey)) < 1e-7), `label ${i} anchor not on sampled curve`);
+    assert.ok(obstacles.every(other => !contains(other, ax, ay)), `anchor ${i} hidden by node/text`);
+    if (!hasLeader) return;
+    assert.ok(obstacles.every(other => !hitsBox(segment, other)), `leader ${i} crosses node/text`);
+    labels.forEach((other, j) => { if (i !== j) assert.ok(!hitsBox(segment, other.getBBox()), `leader ${i} crosses label ${j}`); });
+    assert.ok(bx >= box.x - 1e-7 && bx <= box.x + box.width + 1e-7 && by >= box.y - 1e-7 && by <= box.y + box.height + 1e-7);
+    assert.ok(Math.min(Math.abs(bx - box.x), Math.abs(bx - box.x - box.width), Math.abs(by - box.y), Math.abs(by - box.y - box.height)) < 1e-7,
+      `leader ${i} must stop at label border`);
+    assert.ok(Math.hypot(bx - ax, by - ay) <= 40, 'leader must stay short');
+  });
+};
+
 const arrange = (layout, mode) => { layout.ids.layout.value = mode; layout.ids.arrange.fire('click'); };
 const pointer = (layout, name, x, y, id = 1) => {
   const target = name ? layout.nodes().find(n => n.children.some(c => c.textContent === name)) : layout.ids.graph;
@@ -157,6 +229,44 @@ test('dense edge labels avoid nodes and each other with deterministic bounded vi
   const repeatLayer = repeat.ids.viewport.children.find(group => group.children.some(child => child.classList.contains('edge-label')));
   assert.deepEqual(labels.map(label => [label.attributes.x, label.attributes.y]), repeatLayer.children.filter(child => child.classList.contains('edge-label')).map(label => [label.attributes.x, label.attributes.y]));
   assert.equal(layout.ids.graph.attributes.viewBox, repeat.ids.graph.attributes.viewBox);
+  assert.ok(labelLayer.children.some(e => e.classList.contains('edge-label-leader')), 'exercise actual leaders');
+  assertLabelGeometry(layout);
+  pointer(layout, 'ReadLedger', 200, 200);
+  layout.ids.graph.fire('pointermove', {pointerId: 1, clientX: 240, clientY: 180});
+  layout.ids.graph.fire('pointerup', {pointerId: 1});
+  layout.flush();
+  assertLabelGeometry(layout);
+  for (const mode of ['flow-down', 'flow-right', 'grid']) {
+    arrange(layout, mode);
+    assertLabelGeometry(layout);
+  }
+});
+
+test('leaders avoid prior labels and later labels cannot cover earlier leaders', () => {
+  // Reduced adversarial fixtures: removing either segment reservation guard breaks its case.
+  const cases = [
+    [[2, 7, 6, 10], [2, 4, 20, 8], [2, 5, 22, 6], [2, 5, 24, 8], [2, 6, 30, 6], [4, 7, 0, 4],
+      [6, 3, 5, 5], [6, 5, 8, 4], [6, 2, 17, 1], [6, 3, 27, 11], [6, 1, 28, 8], [6, 2, 33, 1]],
+    [[0, 8, 13, 6], [1, 7, 32, 3], [4, 5, 11, 0], [4, 5, 19, 8], [4, 8, 27, 5], [4, 7, 31, 6],
+      [5, 7, 6, 10], [5, 7, 15, 4]]
+  ];
+  for (const connections of cases) {
+    const entities = Array.from({length: 9}, (_, i) => ({name: `Node${i}`, relationships: []}));
+    for (const [source, target, id, repeats] of connections)
+      entities[source].relationships.push(rel(`Node${target}`, `${id}-` + 'long role '.repeat(repeats), '1:n'));
+    const layout = start({entities});
+    assertLabelGeometry(layout);
+    const labels = labelLayer(layout).children.filter(e => e.tag === 'text');
+    entities.flatMap(entity => entity.relationships.map(r => ({source: entity.name, ...r}))).forEach((r, i) => {
+      const value = `${r.role} · ${r.cardinality}`;
+      assert.ok(labels[i].textContent === value || labels[i].textContent === `${r.source} → ${r.entity} · ${value}`);
+    });
+    layout.nodes()[4].fire('keydown', {key: 'ArrowDown', altKey: true});
+    layout.flush();
+    assertLabelGeometry(layout);
+    arrange(layout, 'grid');
+    assertLabelGeometry(layout);
+  }
 });
 
 test('relationship labels avoid long rendered node text and rectangles', () => {
@@ -173,21 +283,69 @@ test('relationship labels avoid long rendered node text and rectangles', () => {
   }
 });
 
-test('relationship label fallback adds a linked leader', () => {
-  let attempts = 0;
-  const layout = start({entities: [
-    {name: 'Source', relationships: [rel('Target', 'forced fallback', '1:n')]},
+test('fully obscured edges use deterministic explicit overflow labels, never fake leaders', () => {
+  const model = {entities: [
+    {name: 'Source', relationships: [rel('Target', 'forced fallback', '1:n'), rel('Target', '<offers>', '0..1:n')]},
     {name: 'Target'}
+  ]};
+  // A rendered node title obscures every candidate curve point, not a changing measurement mock.
+  const measure = element => element.textContent === 'Source' && element.tag === 'text'
+    ? {x: Number(element.attributes.x) - 2000, y: Number(element.attributes.y) - 2000, width: 4000, height: 4000} : undefined;
+  const a = start(model, measure), b = start(model, measure);
+  for (const layout of [a, b]) {
+    const labels = labelLayer(layout).children;
+    assert.deepEqual(labels.map(e => e.textContent), ['Source → Target · forced fallback · 1:n', 'Source → Target · <offers> · 0..1:n']);
+    assert.ok(labels.every(e => e.tag === 'text'));
+    assertLabelGeometry(layout);
+    const [x, y, w, h] = layout.ids.graph.attributes.viewBox.split(' ').map(Number);
+    assert.ok([x, y, w, h].every(Number.isFinite));
+    for (const label of labels) {
+      const box = label.getBBox();
+      assert.ok(box.x >= x && box.y >= y && box.x + box.width <= x + w && box.y + box.height <= y + h);
+    }
+  }
+  assert.deepEqual(labelLayer(a).children.map(e => e.attributes), labelLayer(b).children.map(e => e.attributes));
+});
+
+test('same-column spanning edges choose visible curve anchors around middle node text', () => {
+  const model = {entities: [
+    {name: 'Source', relationships: [rel('Target', 'offers', '1:n'), rel('Target', 'holds', '0..1:n'), rel('Target', 'executes', '1:1')]},
+    {name: 'SideA'}, {name: 'SideB'},
+    {name: 'PermissionMode'}, {name: 'ReadLedger'}, {name: 'ProviderDiscovery'},
+    {name: 'Target', subtypeOf: 'Source', relationships: [rel('Source', 'reverse', 'n:1')]}
+  ]};
+  const layout = start(model);
+  const [sx, sy, cx, cy, ex, ey] = pathNumbers(edgePaths(layout)[0]);
+  const middleText = layout.nodes()[3].children.filter(e => e.tag === 'text').map(e => e.getBBox());
+  assert.ok(middleText.some(box => contains(box, (sx + 2*cx + ex)/4, (sy + 2*cy + ey)/4)));
+  assertLabelGeometry(layout);
+  for (const value of ['offers · 1:n', 'holds · 0..1:n', 'executes · 1:1', 'is-a', 'reverse · n:1'])
+    assert.ok(labelLayer(layout).children.some(e => e.textContent === value), `visible edge should retain local ${value}`);
+  pointer(layout, 'PermissionMode', 200, 200);
+  layout.ids.graph.fire('pointermove', {pointerId: 1, clientX: 220, clientY: 230});
+  layout.ids.graph.fire('pointerup', {pointerId: 1});
+  layout.flush();
+  assertLabelGeometry(layout);
+  for (const mode of ['flow-down', 'flow-right', 'grid']) {
+    arrange(layout, mode);
+    assertLabelGeometry(layout);
+  }
+});
+
+test('label measurement is cached per content, not per placement or drag candidate', () => {
+  const reads = new Map();
+  const layout = start({entities: [
+    {name: 'A', relationships: [rel('B', 'role', '1:n'), rel('B', 'role', '1:n')]}, {name: 'B'}
   ]}, element => {
-    if (element.textContent === 'forced fallback · 1:n' && attempts++ < 61) return {x: 40, y: 55, width: 250, height: 70};
+    if (element.textContent.includes(' · ')) reads.set(element.textContent, (reads.get(element.textContent) || 0) + 1);
   });
-  const labels = labelLayer(layout);
-  const label = labels.children.find(child => child.textContent === 'forced fallback · 1:n');
-  const index = labels.children.indexOf(label);
-  const leader = labels.children[index - 1];
-  assert.equal(attempts, 62);
-  assert.equal(leader.classList.contains('edge-label-leader'), true);
-  assert.ok(leader.attributes.d.endsWith(`L ${label.attributes.x} ${label.attributes.y}`));
+  for (let i = 0; i < 5; i++) {
+    layout.nodes()[0].fire('keydown', {key: 'ArrowRight', altKey: true});
+    layout.flush();
+  }
+  arrange(layout, 'grid');
+  assert.equal(reads.get('role · 1:n'), 1);
+  assert.ok([...reads.values()].every(count => count === 1));
 });
 
 test('external incoming, global values and hostile text remain text only', () => {
@@ -423,4 +581,11 @@ test('coincident nodes retain finite edge paths and labels after movement', () =
   assert.ok(labelLayer(layout).children.every(e => !/NaN|Infinity/.test(Object.values(e.attributes).join(' '))));
   layout.ids.fit.fire('click');
   assert.ok(layout.ids.graph.attributes.viewBox.split(' ').map(Number).every(Number.isFinite));
+  assert.deepEqual(labelLayer(layout).children.map(e => e.textContent), ['A → B · edge · 1:n']);
+  assertLabelGeometry(layout);
+  const prior = labelLayer(layout).children.map(e => ({...e.attributes}));
+  a.fire('keydown', {key: 'ArrowRight', altKey: true});
+  a.fire('keydown', {key: 'ArrowLeft', altKey: true});
+  layout.flush();
+  assert.deepEqual(labelLayer(layout).children.map(e => e.attributes), prior);
 });
