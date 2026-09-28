@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const script = fs.readFileSync(__dirname + '/viewer.js', 'utf8');
+const css = fs.readFileSync(__dirname + '/viewer.css', 'utf8');
 
 class Element {
   constructor(tag, measure) {
@@ -60,21 +61,28 @@ class Element {
 }
 function start(model, measure, source = script, globals = {}) {
   const ids = Object.fromEntries(['graph', 'viewport', 'details', 'globals', 'title', 'description',
-    'search', 'zoom-in', 'zoom-out', 'layout', 'arrange', 'fit'].map(id => [id, new Element(id, measure)]));
+    'search', 'theme', 'zoom-in', 'zoom-out', 'layout', 'arrange', 'fit'].map(id => [id, new Element(id, measure)]));
+  ids.search.value = '';
+  ids.theme.value = 'system';
   ids.layout.value = 'grid';
+  ids.documentElement = {dataset: {}};
   const frames = new Map();
   let nextFrame = 0;
   ids['model-data'] = {textContent: JSON.stringify(model)};
-  vm.runInNewContext(source, {requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
-    cancelAnimationFrame: id => frames.delete(id), document: {
+  const dom = {
+    documentElement: ids.documentElement,
     getElementById: id => ids[id],
     createElement: tag => new Element(tag, measure),
     createElementNS: (ns, tag) => new Element(tag, measure)
-  }, ...globals});
+  };
+  vm.runInNewContext(source, {window: {}, requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
+    cancelAnimationFrame: id => frames.delete(id), document: dom, ...globals});
   const all = root => [root, ...root.children.flatMap(all)];
   const nodes = () => ids.viewport.querySelectorAll('.node');
   const details = () => all(ids.details).map(e => e.textContent);
-  return {ids, all, nodes, details, flush: () => { for (const [id, callback] of frames) { frames.delete(id); callback(); } }};
+  return {ids, dom, all, nodes, details, pending: () => frames.size,
+    step: () => { const batch = [...frames]; batch.forEach(([id, callback]) => { frames.delete(id); callback(); }); },
+    flush: () => { for (const [id, callback] of frames) { frames.delete(id); callback(); } }};
 }
 function productionSegmentHits() {
   let segmentHits;
@@ -133,10 +141,18 @@ const assertLabelGeometry = layout => {
   const paths = edgePaths(layout);
   assert.equal(labels.length, paths.length);
   labels.forEach((label, i) => {
-    const box = label.getBBox();
+    const bg = children[children.indexOf(label) - 1];
+    assert.ok(bg.classList.contains('label-bg'));
+    const box = bg.getBBox(), textBox = label.getBBox();
+    assert.ok(Math.abs(box.x - (textBox.x - 5)) < 1e-7 && Math.abs(box.y - (textBox.y - 3)) < 1e-7);
+    assert.equal(box.width, textBox.width + 10);
+    assert.equal(box.height, textBox.height + 6);
     assert.ok(obstacles.every(other => !intersects(box, other)), `label ${i} overlaps node/text`);
-    labels.forEach((other, j) => { if (i !== j) assert.ok(!intersects(box, other.getBBox()), `labels ${i}/${j} overlap`); });
-    const leader = children[children.indexOf(label) - 1];
+    labels.forEach((other, j) => { if (i !== j) {
+      const otherBg = children[children.indexOf(other) - 1];
+      assert.ok(!intersects(box, otherBg.getBBox()), `labels ${i}/${j} overlap`);
+    } });
+    const leader = children[children.indexOf(bg) - 1];
     const hasLeader = leader?.classList.contains('edge-label-leader');
     if (!hasLeader && label.textContent.includes(' → ')) return;
     const segment = hasLeader ? pathNumbers(leader) : [box.x + box.width / 2, box.y + box.height / 2];
@@ -148,7 +164,10 @@ const assertLabelGeometry = layout => {
     assert.ok(obstacles.every(other => !contains(other, ax, ay)), `anchor ${i} hidden by node/text`);
     if (!hasLeader) return;
     assert.ok(obstacles.every(other => !hitsBox(segment, other)), `leader ${i} crosses node/text`);
-    labels.forEach((other, j) => { if (i !== j) assert.ok(!hitsBox(segment, other.getBBox()), `leader ${i} crosses label ${j}`); });
+    labels.forEach((other, j) => { if (i !== j) {
+      const otherBg = children[children.indexOf(other) - 1];
+      assert.ok(!hitsBox(segment, otherBg.getBBox()), `leader ${i} crosses label ${j}`);
+    } });
     assert.ok(bx >= box.x - 1e-7 && bx <= box.x + box.width + 1e-7 && by >= box.y - 1e-7 && by <= box.y + box.height + 1e-7);
     assert.ok(Math.min(Math.abs(bx - box.x), Math.abs(bx - box.x - box.width), Math.abs(by - box.y), Math.abs(by - box.y - box.height)) < 1e-7,
       `leader ${i} must stop at label border`);
@@ -184,8 +203,9 @@ test('populated graph routes directed parallel edges and lists self roles', () =
   assert.equal(new Set(paths.map(p => p.attributes.d)).size, 4);
   assert.ok(paths.every(p => p.attributes['marker-end'] === 'url(#arrow)'));
   const edgeLabels = graph.filter(e => e.tag === 'text' && e.classList.contains('edge-label'));
-  assert.deepEqual(edgeLabels.map(e => e.textContent), ['derived', 'previous · 1:0..1', 'next · 0..1:1', 'entity',
-    'owner · 1:1', 'reviewer · 0..1:n', 'is-a', 'children · 1:n']);
+  assert.deepEqual(edgeLabels.map(e => e.textContent), ['owner · 1:1', 'reviewer · 0..1:n', 'is-a', 'children · 1:n']);
+  assert.deepEqual(nodes()[0].children.filter(e => e.classList.contains('node-secondary')).map(e => e.textContent),
+    ['previous · 1:0..1', 'next · 0..1:1']);
   assert.equal(new Set(edgeLabels.slice(-4).map(e => `${e.attributes.x},${e.attributes.y}`)).size, 4);
   assert.deepEqual(paths.map(p => p.attributes.class), ['edge owned', 'edge referenced', 'edge isa', 'edge referenced']);
   assert.equal(nodes()[0].children.find(e => e.tag === 'rect').attributes.height, '110');
@@ -293,9 +313,8 @@ test('fully obscured edges use deterministic explicit overflow labels, never fak
     ? {x: Number(element.attributes.x) - 2000, y: Number(element.attributes.y) - 2000, width: 4000, height: 4000} : undefined;
   const a = start(model, measure), b = start(model, measure);
   for (const layout of [a, b]) {
-    const labels = labelLayer(layout).children;
+    const labels = labelLayer(layout).children.filter(e => e.tag === 'text');
     assert.deepEqual(labels.map(e => e.textContent), ['Source → Target · forced fallback · 1:n', 'Source → Target · <offers> · 0..1:n']);
-    assert.ok(labels.every(e => e.tag === 'text'));
     assertLabelGeometry(layout);
     const [x, y, w, h] = layout.ids.graph.attributes.viewBox.split(' ').map(Number);
     assert.ok([x, y, w, h].every(Number.isFinite));
@@ -304,7 +323,8 @@ test('fully obscured edges use deterministic explicit overflow labels, never fak
       assert.ok(box.x >= x && box.y >= y && box.x + box.width <= x + w && box.y + box.height <= y + h);
     }
   }
-  assert.deepEqual(labelLayer(a).children.map(e => e.attributes), labelLayer(b).children.map(e => e.attributes));
+  assert.deepEqual(labelLayer(a).children.filter(e => e.tag === 'text').map(e => e.attributes),
+    labelLayer(b).children.filter(e => e.tag === 'text').map(e => e.attributes));
 });
 
 test('same-column spanning edges choose visible curve anchors around middle node text', () => {
@@ -581,11 +601,197 @@ test('coincident nodes retain finite edge paths and labels after movement', () =
   assert.ok(labelLayer(layout).children.every(e => !/NaN|Infinity/.test(Object.values(e.attributes).join(' '))));
   layout.ids.fit.fire('click');
   assert.ok(layout.ids.graph.attributes.viewBox.split(' ').map(Number).every(Number.isFinite));
-  assert.deepEqual(labelLayer(layout).children.map(e => e.textContent), ['A → B · edge · 1:n']);
+  assert.deepEqual(labelLayer(layout).children.filter(e => e.tag === 'text').map(e => e.textContent), ['A → B · edge · 1:n']);
   assertLabelGeometry(layout);
   const prior = labelLayer(layout).children.map(e => ({...e.attributes}));
   a.fire('keydown', {key: 'ArrowRight', altKey: true});
   a.fire('keydown', {key: 'ArrowLeft', altKey: true});
   layout.flush();
-  assert.deepEqual(labelLayer(layout).children.map(e => e.attributes), prior);
+  labelLayer(layout).children.forEach((element, i) => {
+    for (const [key, value] of Object.entries(element.attributes)) {
+      if (key === 'x' || key === 'y') assert.ok(Math.abs(Number(value) - Number(prior[i][key])) < 1e-7);
+      else assert.equal(value, prior[i][key]);
+    }
+  });
+});
+
+test('selection, edge hover and focus compose with search and redraw by connection ID', () => {
+  const layout = start({entities: [
+    {name: 'A', relationships: [rel('B', 'first', '1:n'), rel('B', 'parallel', '0..1:n')]},
+    {name: 'B', relationships: [rel('C', 'next', '1:1')]}, {name: 'C'}, {name: 'D'}
+  ]});
+  const {ids, nodes, all, dom} = layout;
+  const ofClass = name => all(ids.viewport).filter(e => e.classList.contains(name));
+  const dim = () => nodes().map(n => n.classList.contains('dim'));
+  const highlighted = name => ofClass(name).map(e => e.classList.contains('highlight'));
+  nodes()[0].fire('click');
+  assert.deepEqual(dim(), [false, false, true, true]);
+  assert.deepEqual(highlighted('edge'), [true, true, false]);
+  ofClass('edge-hit')[2].fire('pointerenter');
+  assert.deepEqual(dim(), [true, false, false, true]);
+  assert.deepEqual(highlighted('edge'), [false, false, true]);
+  assert.deepEqual(highlighted('edge-label'), [false, false, true]);
+  assert.deepEqual(highlighted('label-bg'), [false, false, true]);
+  ofClass('edge-hit')[2].fire('pointerleave');
+  assert.deepEqual(dim(), [false, false, true, true]);
+  ofClass('label-bg')[2].fire('pointerenter');
+  assert.deepEqual(highlighted('edge'), [false, false, true]);
+  ofClass('label-bg')[2].fire('pointerleave');
+  const focused = ofClass('label-bg')[2];
+  assert.equal(focused.attributes.role, 'img');
+  assert.equal(focused.attributes['aria-labelledby'], 'edge-title-2');
+  assert.equal(ofClass('edge-hit')[2].attributes.tabindex, undefined);
+  assert.equal(ofClass('edge-hit')[2].attributes['aria-hidden'], 'true');
+  assert.equal(labelLayer(layout).attributes['aria-hidden'], undefined);
+  assert.equal(labelLayer(layout).children.find(element => element.attributes.id === 'edge-title-2').textContent, 'B to C: next · 1:1');
+  dom.activeElement = focused; focused.fire('focus');
+  ids.search.value = 'a'; ids.search.fire('input');
+  assert.deepEqual(dim(), [true, true, true, true], 'hover dims A; search dims nonmatching B/C');
+  assert.equal(nodes()[0].classList.contains('selected'), true);
+  nodes()[1].fire('keydown', {key: 'ArrowDown', altKey: true}); layout.flush();
+  assert.equal(ofClass('label-bg')[2].focused, true, 'relationship label focus restored on redraw');
+  assert.deepEqual(highlighted('edge'), [false, false, true]);
+  arrange(layout, 'flow-right'); ids.fit.fire('click');
+  assert.equal(nodes()[0].classList.contains('selected'), true);
+  assert.deepEqual(highlighted('edge'), [false, false, true]);
+  ofClass('label-bg')[2].fire('blur');
+  assert.deepEqual(highlighted('edge'), [true, true, false]);
+  ids.search.value = ''; ids.search.fire('input');
+  assert.deepEqual(dim(), [false, false, true, true]);
+});
+
+test('nodes precede named relationship focus targets, which are never aria-hidden', () => {
+  const layout = start({entities: [{name: 'A', relationships: [rel('B', 'owns', '1:n')]}, {name: 'B'}]});
+  const focusable = layout.all(layout.ids.viewport).filter(element => element.attributes.tabindex === '0');
+  assert.deepEqual(focusable.map(element => element.classList.contains('node') ? 'node' : element.classList.contains('label-bg') ? 'relationship' : element.tag),
+    ['node', 'node', 'relationship']);
+  const relationship = focusable[2];
+  assert.equal(relationship.attributes.role, 'img');
+  assert.equal(relationship.attributes['aria-labelledby'], 'edge-title-0');
+  assert.equal(labelLayer(layout).children.find(element => element.attributes.id === 'edge-title-0').textContent, 'A to B: owns · 1:n');
+  for (const element of focusable) for (let parent = element; parent; parent = parent.parentNode)
+    assert.notEqual(parent.attributes['aria-hidden'], 'true');
+});
+
+test('relationship pointer interaction focuses without panning while the background still pans', () => {
+  const layout = start({entities: [{name: 'A', relationships: [rel('B', 'owns', '1:n')]}, {name: 'B'}]});
+  const {ids, all} = layout;
+  const hit = all(ids.viewport).find(element => element.classList.contains('edge-hit'));
+  const label = all(ids.viewport).find(element => element.classList.contains('label-bg'));
+  const initial = ids.graph.attributes.viewBox;
+  ids.graph.fire('pointerdown', {target: hit, button: 0, isPrimary: true, clientX: 10, clientY: 10, pointerId: 1});
+  assert.equal(label.focused, true);
+  assert.equal(ids.graph.capture, undefined);
+  ids.graph.fire('pointermove', {pointerId: 1, clientX: 40, clientY: 10});
+  assert.equal(ids.graph.attributes.viewBox, initial);
+  ids.graph.fire('pointerdown', {target: label, button: 0, isPrimary: true, clientX: 10, clientY: 10, pointerId: 2});
+  assert.equal(ids.graph.capture, undefined);
+  ids.graph.fire('pointerdown', {target: ids.graph, button: 0, isPrimary: true, clientX: 10, clientY: 10, pointerId: 3});
+  ids.graph.fire('pointermove', {pointerId: 3, clientX: 40, clientY: 10});
+  assert.notEqual(ids.graph.attributes.viewBox, initial);
+  ids.graph.fire('pointerup', {pointerId: 3});
+});
+
+test('Escape clears relationship and selection highlighting without clearing search', () => {
+  const layout = start({entities: [{name: 'A', relationships: [rel('B', 'owns', '1:n')]}, {name: 'B'}, {name: 'C'}]});
+  const {ids, nodes, all} = layout;
+  nodes()[0].fire('click');
+  const relationship = all(ids.viewport).find(element => element.classList.contains('label-bg'));
+  relationship.fire('focus');
+  ids.search.value = 'a'; ids.search.fire('input');
+  ids.graph.fire('keydown', {key: 'Escape', target: relationship});
+  assert.equal(ids.search.value, 'a');
+  assert.deepEqual(nodes().map(node => node.classList.contains('dim')), [false, true, true]);
+  assert.ok(all(ids.viewport).filter(element => element.classList.contains('edge')).every(element => !element.classList.contains('highlight')));
+});
+
+test('label borders meet 3:1 contrast against the canvas in both themes', () => {
+  const luminance = hex => {
+    const channels = hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255)
+      .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    return .2126 * channels[0] + .7152 * channels[1] + .0722 * channels[2];
+  };
+  const ratio = (a, b) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
+  const token = selector => css.match(new RegExp(`${selector}[^}]*--canvas: (#[0-9a-f]{6})[^}]*--label-line: (#[0-9a-f]{6})`, 'i'))?.slice(1);
+  for (const [theme, [canvas, border]] of [['light', token(':root \\{')], ['dark', token(':root\\[data-theme="dark"\\] \\{')]])
+    assert.ok(ratio(canvas, border) >= 3, `${theme} label border ratio is ${ratio(canvas, border)}`);
+  assert.match(css, /\.label-bg \{ fill: var\(--label\); stroke: var\(--label-line\); stroke-width: 1;/);
+});
+
+test('structured details retain modeled fields and hostile values only as text', () => {
+  const hostile = '<script>alert(1)</script>';
+  const layout = start({entities: [
+    {name: 'Local', definition: hostile, derived: true, derivation: hostile,
+      attributes: [{name: hostile, type: 'Money', description: hostile, derived: true, derivation: hostile, required: null},
+        {name: 'optional', type: 'string', required: false}, {name: 'necessary', type: 'int', required: true}],
+      relationships: [{...rel('remote.Value', 'owned', '1:n', 'owned'), note: hostile, symmetric: true}],
+      actions: [{name: 'issue', actor: 'Admin', preserves: ['i-1', 'i-2'], description: hostile}],
+      invariants: [{id: 'i-1', statement: hostile}]},
+    {name: 'remote.Value', external: true, relationships: [rel('Local', 'incoming', 'n:1')]}
+  ]});
+  layout.nodes()[0].fire('click');
+  const descendants = layout.all(layout.ids.details);
+  assert.deepEqual(descendants.filter(e => e.tag === 'dt' || e.tag === 'dd').map(e => e.textContent), [
+    'Name', hostile, 'Type', 'Money', 'Required', 'not specified', 'Description', hostile, 'Derived', 'yes', 'Derivation', hostile,
+    'Name', 'optional', 'Type', 'string', 'Required', 'no', 'Description', 'None', 'Derived', 'no',
+    'Name', 'necessary', 'Type', 'int', 'Required', 'yes', 'Description', 'None', 'Derived', 'no',
+    'Name', 'issue', 'Actor', 'Admin', 'Preserves', 'i-1, i-2', 'Description', hostile,
+    'ID', 'i-1', 'Statement', hostile
+  ]);
+  assert.ok(layout.details().includes('Local → remote.Value · owned · 1:n · owned · symmetric · ' + hostile));
+  assert.ok(layout.details().includes('remote.Value → Local · incoming · n:1 · referenced'));
+  assert.ok(descendants.every(e => e.tag !== 'script' && !Object.values(e.attributes).some(v => v.includes(hostile))));
+  layout.nodes()[1].fire('click');
+  assert.ok(layout.details().includes('Local → remote.Value · owned · 1:n · owned · symmetric · ' + hostile));
+});
+
+test('label background geometry assertion detects lost padding', () => {
+  const mutated = script.replace('const width = measured.width + 10, height = measured.height + 6;',
+    'const width = measured.width, height = measured.height;');
+  assert.notEqual(mutated, script);
+  const layout = start({entities: [{name: 'A', relationships: [rel('B', 'role', '1:n')]}, {name: 'B'}]}, undefined, mutated);
+  assert.throws(() => assertLabelGeometry(layout), /AssertionError/);
+});
+
+test('theme is session-only; fit eases, cancels, and honors reduced motion', () => {
+  let now = 0, onChange, cancels = 0, fades = 0;
+  const motion = {matches: false, addEventListener: (type, fn) => { onChange = fn; }};
+  const animate = Element.prototype.animate;
+  Element.prototype.animate = function () { fades++; return {cancel() { cancels++; }}; };
+  try {
+    const layout = start({entities: [{name: 'A'}, {name: 'B'}]}, undefined, script,
+      {window: {matchMedia: () => motion}, performance: {now: () => now}});
+    const {ids, pending, step} = layout;
+    ids.theme.value = 'dark'; ids.theme.fire('change');
+    assert.equal(ids.documentElement.dataset.theme, 'dark');
+    ids.theme.value = 'light'; ids.theme.fire('change');
+    assert.equal(ids.documentElement.dataset.theme, 'light');
+    ids.theme.value = 'system'; ids.theme.fire('change');
+    assert.equal(ids.documentElement.dataset.theme, 'system');
+    ids['zoom-in'].fire('click');
+    const zoomed = ids.graph.attributes.viewBox;
+    ids.fit.fire('click'); assert.equal(ids.graph.attributes.viewBox, zoomed);
+    assert.equal(pending(), 1);
+    now = 110; step(); assert.notEqual(ids.graph.attributes.viewBox, zoomed);
+    assert.equal(pending(), 1);
+    ids['zoom-out'].fire('click'); assert.equal(pending(), 0);
+    ids.fit.fire('click'); assert.equal(pending(), 1);
+    ids.graph.fire('keydown', {key: 'ArrowRight'}); assert.equal(pending(), 0);
+    ids.fit.fire('click'); assert.equal(pending(), 1);
+    pointer(layout, null, 100, 100); assert.equal(pending(), 0);
+    ids.graph.fire('pointerup', {pointerId: 1});
+    ids.fit.fire('click'); assert.equal(pending(), 1);
+    now = 160; step(); motion.matches = true; onChange();
+    assert.equal(pending(), 0);
+    const reduced = ids.graph.attributes.viewBox;
+    ids['zoom-in'].fire('click'); ids.fit.fire('click');
+    assert.equal(ids.graph.attributes.viewBox, reduced);
+    assert.equal(pending(), 0);
+    arrange(layout, 'flow-down'); assert.equal(pending(), 0);
+    assert.equal(fades, 1, 'initial Arrange only; reduced-motion Arrange has no fade');
+    motion.matches = false; onChange();
+    arrange(layout, 'grid'); assert.equal(fades, 2);
+    arrange(layout, 'flow-down'); assert.equal(fades, 3);
+    assert.ok(cancels >= 2, 'new Arrange cancels previous fade');
+  } finally { Element.prototype.animate = animate; }
 });

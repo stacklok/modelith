@@ -8,6 +8,8 @@
   const NS = 'http://www.w3.org/2000/svg';
   const entities = model.entities || [];
   const list = items => items || [];
+  const theme = document.getElementById('theme');
+  theme.addEventListener('change', () => { document.documentElement.dataset.theme = theme.value; });
   const byName = new Map(entities.map(entity => [entity.name, entity]));
   const heights = new Map(entities.map(entity => [entity.name, 70 + list(entity.relationships).filter(r => r.entity === entity.name).length * 20]));
   const nodeHeight = entity => heights.get(entity.name);
@@ -31,16 +33,42 @@
     element.textContent = value;
     return element;
   };
-  const line = (parent, value) => html('div', parent, value, 'item');
+  const line = (parent, value) => html('p', parent, value, 'item');
   const heading = (parent, value) => html('h3', parent, value);
   const values = (parent, title, items, describe) => {
     heading(parent, title);
     if (!list(items).length) line(parent, 'None');
-    list(items).forEach(item => line(parent, describe(item)));
+    else {
+      const ul = html('ul', parent);
+      list(items).forEach(item => html('li', ul, describe(item)));
+    }
+  };
+  const fields = (parent, entries) => {
+    const dl = html('dl', parent);
+    entries.forEach(([name, value]) => {
+      html('dt', dl, name);
+      html('dd', dl, String(value));
+    });
+  };
+  const records = (parent, title, items, render) => {
+    heading(parent, title);
+    if (!list(items).length) { line(parent, 'None'); return; }
+    const ul = html('ul', parent, undefined, 'records');
+    list(items).forEach(item => render(html('li', ul), item));
   };
   const relText = (from, rel) => `${from} → ${rel.entity} · ${rel.role || '(no role)'} · ${rel.cardinality} · ${rel.ownership || 'referenced'}${rel.symmetric ? ' · symmetric' : ''}${rel.note ? ' · ' + rel.note : ''}`;
   const applyView = () => svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`);
+  const motion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  let cameraFrame = 0, fade, cameraTarget;
+  const cancelMotion = (finish = false) => {
+    if (cameraFrame) { cancelAnimationFrame(cameraFrame); cameraFrame = 0; }
+    if (finish && cameraTarget) { view = cameraTarget; applyView(); }
+    cameraTarget = null;
+    fade?.cancel(); fade = null;
+  };
+  motion?.addEventListener?.('change', () => { if (motion.matches) cancelMotion(true); });
   const zoom = factor => {
+    cancelMotion();
     view.x += view.w * (1 - factor) / 2;
     view.y += view.h * (1 - factor) / 2;
     view.w *= factor;
@@ -48,7 +76,33 @@
     applyView();
   };
   const nodeEntities = new Map();
+  let selected = null, hovered = null, pointerEdge = null, focusedEdge = null;
+  const renderedEdges = new Map();
+  const syncHover = () => { hovered = focusedEdge ?? pointerEdge; visualState(); };
+  const visualState = () => {
+    const active = hovered === null ? connections.filter(c => c.source === selected || c.target === selected) : connections.filter(c => c.id === hovered);
+    const neighbors = new Set(hovered === null ? [selected] : []);
+    active.forEach(c => { neighbors.add(c.source); neighbors.add(c.target); });
+    const query = document.getElementById('search').value.toLocaleLowerCase();
+    const matches = name => name.toLocaleLowerCase().includes(query);
+    const focus = hovered !== null || selected !== null;
+    nodeEntities.forEach((entity, node) => {
+      node.classList.toggle('selected', entity.name === selected);
+      node.classList.toggle('highlight', focus && neighbors.has(entity.name));
+      node.classList.toggle('dim', !matches(entity.name) || focus && !neighbors.has(entity.name));
+    });
+    connections.forEach(c => {
+      const current = renderedEdges.get(c.id);
+      if (!current) return;
+      const hit = active.includes(c);
+      current.forEach(element => {
+        element.classList.toggle('highlight', focus && hit);
+        element.classList.toggle('dim', !matches(c.source) && !matches(c.target) || focus && !hit);
+      });
+    });
+  };
   const select = name => {
+    selected = name;
     const entity = byName.get(name);
     details.replaceChildren();
     html('h2', details, entity.name + (entity.external ? ' (external)' : ''));
@@ -58,15 +112,20 @@
       line(details, entity.definition || 'No description');
       if (entity.derived) line(details, `Derived entity${entity.derivation ? ': ' + entity.derivation : ''}`);
       if (entity.subtypeOf) line(details, `Is a ${entity.subtypeOf}`);
-      values(details, 'Attributes', entity.attributes, a => `${a.name}: ${a.type} · required: ${a.required === null ? 'not specified' : a.required}${a.derived ? ' · derived: ' + a.derivation : ''}${a.description ? ' · ' + a.description : ''}`);
+      records(details, 'Attributes', entity.attributes, (row, a) => fields(row, [
+        ['Name', a.name], ['Type', a.type], ['Required', a.required === null || a.required === undefined ? 'not specified' : a.required ? 'yes' : 'no'],
+        ['Description', a.description || 'None'], ['Derived', a.derived ? 'yes' : 'no'],
+        ...(a.derived ? [['Derivation', a.derivation || 'None']] : [])]));
       values(details, 'Outgoing relationships', entity.relationships, r => relText(entity.name, r));
     }
     values(details, 'Incoming relationships', entities.flatMap(other => list(other.relationships).filter(r => r.entity === entity.name).map(r => relText(other.name, r))), r => r);
     if (!entity.external) {
-      values(details, 'Actions', entity.actions, a => `${a.name}${a.actor ? ' · actor: ' + a.actor : ''}${a.preserves?.length ? ' · preserves: ' + a.preserves.join(', ') : ''}${a.description ? ' · ' + a.description : ''}`);
-      values(details, 'Invariants', entity.invariants, i => `${i.id}: ${i.statement}`);
+      records(details, 'Actions', entity.actions, (row, a) => fields(row, [
+        ['Name', a.name], ['Actor', a.actor || 'Not specified'], ['Preserves', list(a.preserves).join(', ') || 'None'],
+        ['Description', a.description || 'None']]));
+      records(details, 'Invariants', entity.invariants, (row, i) => fields(row, [['ID', i.id], ['Statement', i.statement]]));
     }
-    layer.querySelectorAll('.node').forEach(node => node.classList.toggle('selected', nodeEntities.get(node) === entity));
+    visualState();
   };
   document.getElementById('title').textContent = model.title || 'Domain model';
   document.getElementById('description').textContent = model.description;
@@ -74,9 +133,9 @@
   const marker = shape('marker', defs, {id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5,
     markerWidth: 10, markerHeight: 10, markerUnits: 'userSpaceOnUse', orient: 'auto'});
   shape('path', marker, {d: 'M 0 0 L 10 5 L 0 10 z', class: 'arrow'});
-  const edges = shape('g', layer, {'aria-hidden': 'true'});
+  const edges = shape('g', layer, {});
   const nodes = shape('g', layer, {});
-  const labels = shape('g', layer, {'aria-hidden': 'true'});
+  const labels = shape('g', layer, {});
   const padding = 4;
   const expand = box => ({x: box.x - padding, y: box.y - padding, width: box.width + padding * 2, height: box.height + padding * 2});
   const intersects = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
@@ -115,7 +174,7 @@
       const pair = JSON.stringify([entity.name, target].sort());
       const index = pairs.get(pair) || 0;
       pairs.set(pair, index + 1);
-      connections.push({source: entity.name, target, label, kind, index});
+      connections.push({id: connections.length, source: entity.name, target, label, kind, index});
     };
     list(entity.relationships).forEach(r => add(r.entity, `${r.role || '(no role)'} · ${r.cardinality}`, r.ownership === 'owned' ? 'owned' : 'referenced'));
     if (entity.subtypeOf) add(entity.subtypeOf, 'is-a', 'isa');
@@ -125,6 +184,10 @@
     return {x: center.x + dx * scale, y: center.y + dy * scale};
   };
   const renderedNodes = new Map();
+  const edgeTarget = (element, id) => {
+    element.addEventListener('pointerenter', () => { pointerEdge = id; syncHover(); });
+    element.addEventListener('pointerleave', () => { if (pointerEdge === id) { pointerEdge = null; syncHover(); } });
+  };
   let suppressClick = false;
   const arrowSteps = {ArrowLeft: [-40, 0], ArrowRight: [40, 0], ArrowUp: [0, -40], ArrowDown: [0, 40]};
   entities.forEach((entity, i) => {
@@ -136,9 +199,14 @@
     title.textContent = `${entity.name}${entity.external ? ', external' : ''}${entity.derived ? ', derived' : ''}`;
     const shapes = [shape('rect', group, {x: p.x, y: p.y, width: 250, height: nodeHeight(entity), rx: 8}),
       textShape(group, entity.name, p.x + 125, p.y + 32, 'node-label'),
-      textShape(group, entity.external ? 'external' : entity.derived ? 'derived' : 'entity', p.x + 125, p.y + 54, 'edge-label')];
+      textShape(group, entity.external ? 'external' : entity.derived ? 'derived' : 'entity', p.x + 125, p.y + 54, 'node-badge')];
     list(entity.relationships).filter(r => r.entity === entity.name).forEach((r, index) =>
-      shapes.push(textShape(group, `${r.role || '(no role)'} · ${r.cardinality}`, p.x + 125, p.y + 76 + index * 20, 'edge-label')));
+      shapes.push(textShape(group, `${r.role || '(no role)'} · ${r.cardinality}`, p.x + 125, p.y + 76 + index * 20, 'node-secondary')));
+    const badge = shapes[2], badgeBox = badge.getBBox();
+    const badgeBack = shape('rect', group, {x: badgeBox.x - 5, y: badgeBox.y - 2,
+      width: badgeBox.width + 10, height: badgeBox.height + 4, rx: 6, class: 'badge-bg'});
+    group.insertBefore(badgeBack, badge);
+    shapes.push(badgeBack);
     renderedNodes.set(entity.name, {shapes,
       left: Math.min(...shapes.map(s => s.getBBox().x)) - p.x,
       right: Math.max(...shapes.map(s => s.getBBox().x + s.getBBox().width)) - p.x});
@@ -154,6 +222,7 @@
     });
   });
   const moveNode = (name, dx, dy) => {
+    cancelMotion();
     const p = positions.get(name);
     p.x += dx; p.y += dy;
     renderedNodes.get(name).shapes.forEach(s => {
@@ -163,6 +232,7 @@
     scheduleDraw();
   };
   const arrange = mode => {
+    cancelMotion();
     const layers = [];
     if (mode === 'grid') {
       const columns = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(entities.length))));
@@ -210,14 +280,17 @@
     if (frame) { cancelAnimationFrame(frame); frame = 0; }
     draw();
     fit();
+    if (motion && !motion.matches && layer.animate) fade = layer.animate([{opacity: .72}, {opacity: 1}], {duration: 180, easing: 'ease-out'});
   };
   let reservations = [];
   const draw = () => {
+    const restoreFocus = focusedEdge;
     edges.replaceChildren();
     labels.replaceChildren();
+    renderedEdges.clear();
     const pendingLabels = [];
     const edgePoints = [];
-    connections.forEach(({source, target, label, kind, index}) => {
+    connections.forEach(({id, source, target, label, kind, index}) => {
       const from = positions.get(source), to = positions.get(target);
       const a = {x: from.x + 125, y: from.y + nodeHeight(byName.get(source)) / 2, h: nodeHeight(byName.get(source))};
       const b = {x: to.x + 125, y: to.y + nodeHeight(byName.get(target)) / 2, h: nodeHeight(byName.get(target))};
@@ -229,15 +302,31 @@
       const start = boundary(a, c.x - a.x || 1, c.y - a.y);
       const end = boundary(b, c.x - b.x || -1, c.y - b.y);
       edgePoints.push(start, c, end);
-      shape('path', edges, {d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}`,
-        class: `edge ${kind}`, 'marker-end': 'url(#arrow)'});
-      pendingLabels.push({source, target, label, start, c, end});
+      const d = `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}`;
+      const path = shape('path', edges, {d, class: `edge ${kind}`, 'marker-end': 'url(#arrow)', 'pointer-events': 'none'});
+      const hit = shape('path', edges, {d, class: 'edge-hit', 'data-edge-id': id, 'aria-hidden': 'true'});
+      edgeTarget(hit, id);
+      renderedEdges.set(id, [path, hit]);
+      pendingLabels.push({id, source, target, label, start, c, end});
     });
     const reserved = [...renderedNodes.values()].flatMap(node => node.shapes.map(s => expand(s.getBBox())));
     const leaders = [], anchors = [], overflow = [];
-    const placeLabel = ({source, target, label: value, start, c, end}) => {
+    const background = (label, x, y, width, height, id, description) => {
+      const title = shape('title', labels, {id: `edge-title-${id}`});
+      title.textContent = description;
+      const rect = shape('rect', labels, {x, y, width, height, rx: 4, class: 'label-bg', role: 'img', tabindex: 0,
+        'data-edge-id': id, 'aria-labelledby': `edge-title-${id}`});
+      labels.insertBefore(rect, label);
+      edgeTarget(rect, id);
+      rect.addEventListener('focus', () => { focusedEdge = id; syncHover(); });
+      rect.addEventListener('blur', () => { if (focusedEdge === id) { focusedEdge = null; syncHover(); } });
+      renderedEdges.get(id).push(rect, label);
+      return rect;
+    };
+    const placeLabel = ({id, source, target, label: value, start, c, end}) => {
       const label = textShape(labels, value, 0, 0, 'edge-label');
       const measured = measureLabel(label);
+      const width = measured.width + 10, height = measured.height + 6;
       const visible = samples.map(t => {
         const anchor = {x: (1-t)**2*start.x + 2*(1-t)*t*c.x + t*t*end.x,
           y: (1-t)**2*start.y + 2*(1-t)*t*c.y + t*t*end.y};
@@ -254,9 +343,9 @@
           const length = Math.hypot(across, along) || 1;
           const direction = {x: (normal.x*across + tangent.x*along) / length,
             y: (normal.y*across + tangent.y*along) / length};
-          const radius = gap ? 1 / Math.max(Math.abs(direction.x) / (measured.width / 2), Math.abs(direction.y) / (measured.height / 2)) : 0;
+          const radius = gap ? 1 / Math.max(Math.abs(direction.x) / (width / 2), Math.abs(direction.y) / (height / 2)) : 0;
           const center = {x: anchor.x + direction.x*(radius + gap), y: anchor.y + direction.y*(radius + gap)};
-          const box = expand({x: center.x - measured.width / 2, y: center.y - measured.height / 2, width: measured.width, height: measured.height});
+          const box = expand({x: center.x - width / 2, y: center.y - height / 2, width, height});
           if (reserved.some(other => intersects(box, other)) || anchors.some(p => segmentHits(p, p, box)) ||
               leaders.some(leader => segmentHits(leader.a, leader.b, box))) continue;
           const border = {x: anchor.x + direction.x*gap, y: anchor.y + direction.y*gap};
@@ -266,17 +355,20 @@
         }
       }
       if (!chosen) {
-        overflow.push({label, value: `${source} → ${target} · ${value}`});
+        overflow.push({id, source, target, label, value: `${source} → ${target} · ${value}`,
+          description: `${source} to ${target}: ${value}`});
         return;
       }
       label.setAttribute('x', chosen.center.x - measured.x - measured.width / 2);
       label.setAttribute('y', chosen.center.y - measured.y - measured.height / 2);
+      const bg = background(label, chosen.center.x - width / 2, chosen.center.y - height / 2, width, height, id, `${source} to ${target}: ${value}`);
       reserved.push(chosen.box);
       anchors.push(chosen.anchor);
       if (chosen.gap) {
         const {anchor, border} = chosen;
         const leader = shape('path', labels, {d: `M ${anchor.x} ${anchor.y} L ${border.x} ${border.y}`, class: 'edge-label-leader'});
-        labels.insertBefore(leader, label);
+        labels.insertBefore(leader, bg);
+        renderedEdges.get(id).push(leader);
         leaders.push({a: anchor, b: border});
       }
     };
@@ -285,16 +377,20 @@
     const left = reserved.reduce((min, box) => Math.min(min, box.x), Infinity);
     let bottom = reserved.reduce((max, box) => Math.max(max, box.y + box.height),
       edgePoints.reduce((max, p) => Math.max(max, p.y), -Infinity)) + 28;
-    overflow.forEach(({label, value}) => {
+    overflow.forEach(({id, label, value, description}) => {
       label.textContent = value;
       const measured = measureLabel(label);
-      label.setAttribute('x', left - measured.x);
-      label.setAttribute('y', bottom - measured.y);
-      const box = expand({x: left, y: bottom, width: measured.width, height: measured.height});
+      label.setAttribute('x', left + 5 - measured.x);
+      label.setAttribute('y', bottom + 3 - measured.y);
+      const width = measured.width + 10, height = measured.height + 6;
+      background(label, left, bottom, width, height, id, description);
+      const box = expand({x: left, y: bottom, width, height});
       reserved.push(box);
       bottom = box.y + box.height + 20;
     });
     reservations = reserved.concat(edgePoints.map(p => ({x: p.x, y: p.y, width: 0, height: 0})));
+    visualState();
+    if (restoreFocus !== null) renderedEdges.get(restoreFocus)?.[2].focus({preventScroll: true});
   };
   let frame = 0;
   const scheduleDraw = () => {
@@ -302,23 +398,33 @@
   };
   const fit = () => {
     if (frame) { cancelAnimationFrame(frame); frame = 0; draw(); }
+    cancelMotion();
     const minX = reservations.reduce((min, box) => Math.min(min, box.x), Infinity);
     const minY = reservations.reduce((min, box) => Math.min(min, box.y), Infinity);
     const maxX = reservations.reduce((max, box) => Math.max(max, box.x + box.width), -Infinity);
     const maxY = reservations.reduce((max, box) => Math.max(max, box.y + box.height), -Infinity);
-    view = reservations.length
+    const target = reservations.length
       ? {x: minX - 10, y: minY - 10, w: Math.max(500, maxX - minX + 20), h: Math.max(280, maxY - minY + 20)}
       : {x: 0, y: 0, w: 500, h: 280};
-    applyView();
+    if (!view || !motion || motion.matches) { view = target; applyView(); return; }
+    const start = {...view};
+    const begun = performance.now();
+    cameraTarget = target;
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - begun) / 220);
+      const ease = 1 - (1 - t) ** 3;
+      view = Object.fromEntries(Object.keys(target).map(key => [key, start[key] + (target[key] - start[key]) * ease]));
+      applyView();
+      if (t < 1) cameraFrame = requestAnimationFrame(tick);
+      else { cameraFrame = 0; cameraTarget = null; }
+    };
+    cameraFrame = requestAnimationFrame(tick);
   };
   const layout = document.getElementById('layout');
   document.getElementById('arrange').addEventListener('click', () => arrange(layout.value));
   arrange('grid');
   const search = document.getElementById('search');
-  search.addEventListener('input', () => {
-    const query = search.value.toLocaleLowerCase();
-    nodes.querySelectorAll('.node').forEach(node => node.classList.toggle('dim', !nodeEntities.get(node).name.toLocaleLowerCase().includes(query)));
-  });
+  search.addEventListener('input', visualState);
   document.getElementById('zoom-in').addEventListener('click', () => zoom(0.8));
   document.getElementById('zoom-out').addEventListener('click', () => zoom(1.25));
   document.getElementById('fit').addEventListener('click', fit);
@@ -326,10 +432,16 @@
     if (event.altKey && arrowSteps[event.key] && event.target.closest('.node')) return;
     if (arrowSteps[event.key]) {
       event.preventDefault();
+      cancelMotion();
       view.x += arrowSteps[event.key][0]; view.y += arrowSteps[event.key][1]; applyView();
     } else if (event.key === '+' || event.key === '=') { event.preventDefault(); zoom(0.8); }
     else if (event.key === '-') { event.preventDefault(); zoom(1.25); }
     else if (event.key === '0') { event.preventDefault(); fit(); }
+    else if (event.key === 'Escape') {
+      selected = null; pointerEdge = null; focusedEdge = null;
+      syncHover();
+      svg.focus({preventScroll: true});
+    }
   });
   const point = event => {
     const p = svg.createSVGPoint();
@@ -337,9 +449,17 @@
     return p.matrixTransform(svg.getScreenCTM().inverse());
   };
   let drag = null;
+  svg.addEventListener('pointerleave', () => { pointerEdge = null; syncHover(); });
   svg.addEventListener('pointerdown', event => {
     if (drag || event.button !== 0 || event.isPrimary === false) return;
     suppressClick = false;
+    cancelMotion();
+    const relationship = event.target.closest('.edge-hit') || event.target.closest('.label-bg');
+    if (relationship) {
+      renderedEdges.get(Number(relationship.getAttribute('data-edge-id')))?.[2].focus({preventScroll: true});
+      event.preventDefault();
+      return;
+    }
     const node = event.target.closest('.node');
     drag = {id: event.pointerId, name: node ? nodeEntities.get(node).name : null,
       capture: node || svg, x: event.clientX, y: event.clientY, moved: false};

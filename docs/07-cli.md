@@ -69,6 +69,15 @@ press Alt+arrow keys. Click **Fit view** to show the current geometry without
 moving nodes. **Arrange** replaces manual positions; reloading the file also
 restores the initial grid. Positions are not saved. Drag the background or use
 arrow keys to pan, and use the zoom buttons or + and − to zoom. Press 0 to fit.
+Selecting an entity emphasizes its relationships and neighbors. Hover or click a
+relationship, or Tab to its label, to highlight the label and both endpoints.
+Press Escape in the graph to clear selection and relationship highlighting. Search always dims
+nonmatching entities, even when selected or highlighted; clearing search restores
+them. Edge hover/focus temporarily takes precedence over selection, which returns
+when the pointer leaves or focus moves away. The Theme selector defaults to System
+and can be set to Light or Dark for this page only. Selection, search, theme, and
+positions reset on reload. Arrange crossfades briefly and Fit eases the camera;
+reduced-motion preferences disable both transitions.
 
 | Flag | Default | Description |
 |---|---|---|
