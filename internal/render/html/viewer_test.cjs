@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const script = fs.readFileSync(__dirname + '/viewer.js', 'utf8');
 const css = fs.readFileSync(__dirname + '/viewer.css', 'utf8');
+const shell = fs.readFileSync(__dirname + '/shell.html', 'utf8');
 
 class Element {
   constructor(tag, measure) {
@@ -65,11 +66,12 @@ class Element {
   releasePointerCapture(id) { if (this.capture === id) this.capture = undefined; }
 }
 function start(model, measure, source = script, globals = {}) {
-  const ids = Object.fromEntries(['graph', 'viewport', 'details', 'globals', 'title', 'description',
+  const ids = Object.fromEntries(['viewer', 'graph', 'viewport', 'details-panel', 'details', 'details-toggle', 'details-toggle-arrow', 'globals', 'title', 'description',
     'search', 'theme', 'zoom-in', 'zoom-out', 'layout', 'arrange', 'fit'].map(id => [id, new Element(id, measure)]));
   ids.search.value = '';
   ids.theme.value = 'system';
   ids.layout.value = 'grid';
+  ids['details-toggle'].setAttribute('aria-controls', 'details');
   ids.documentElement = {dataset: {}};
   const frames = new Map();
   let nextFrame = 0;
@@ -186,6 +188,52 @@ const pointer = (layout, name, x, y, id = 1) => {
   layout.ids.graph.fire('pointerdown', {target, button: 0, isPrimary: true, clientX: x, clientY: y, pointerId: id});
   return target;
 };
+
+test('persistent details control starts expanded, links inner content, and has responsive collapsed states', () => {
+  const {ids} = start({entities: []});
+  assert.equal(ids.details.hidden, false);
+  assert.equal(ids['details-toggle'].attributes['aria-expanded'], 'true');
+  assert.equal(ids['details-toggle'].attributes['aria-controls'], 'details');
+  assert.equal(ids['details-toggle'].attributes['aria-label'], 'Collapse entity details');
+  assert.equal(ids['details-toggle'].handlers.keydown, undefined);
+  assert.match(shell, /<aside id="details-panel" aria-label="Entity details"><header class="details-header"><h2>Entity details<\/h2><button id="details-toggle" type="button" aria-expanded="true" aria-controls="details" aria-label="Collapse entity details">/);
+  assert.doesNotMatch(shell, /id="toggle-details"/);
+  assert.doesNotMatch(shell, /Hide details|Show details/);
+  assert.match(css, /#viewer\.details-collapsed \{ grid-template-columns: minmax\(0, 1fr\) 3rem; \}/);
+  assert.match(css, /#viewer\.details-collapsed #details-toggle \{ flex-direction: column; justify-content: center; width: 100%; height: 100%; min-height: 3rem; padding: \.25rem; border: 0; border-radius: \.7rem; \}/);
+  assert.match(css, /#details-toggle:focus-visible \{ outline-offset: -5px; \}/);
+  assert.match(css, /#viewer\.details-collapsed #details-toggle-rail-label \{ display: inline; writing-mode: vertical-rl; \}/);
+  assert.match(css, /@media \(max-width: 850px\) \{\n  main, #viewer\.details-collapsed \{ grid-template-columns: 1fr; \}/);
+  assert.match(css, /#viewer\.details-collapsed #details-toggle-mobile-label \{ display: inline; \}/);
+});
+
+test('persistent details control preserves graph state and shows the latest collapsed selection', () => {
+  const layout = start({entities: [{name: 'A'}, {name: 'B'}]});
+  const {ids, nodes, details} = layout;
+  nodes()[0].fire('click');
+  ids.search.value = 'a'; ids.search.fire('input');
+  ids.theme.value = 'dark'; ids.theme.fire('change');
+  const view = ids.graph.attributes.viewBox;
+  ids['details-toggle'].fire('click');
+  assert.equal(ids.details.hidden, true);
+  assert.equal(ids.viewer.classList.contains('details-collapsed'), true);
+  assert.equal(ids['details-toggle'].attributes['aria-expanded'], 'false');
+  assert.equal(ids['details-toggle'].attributes['aria-label'], 'Expand entity details');
+  assert.equal(ids['details-toggle-arrow'].textContent, '‹');
+  nodes()[1].fire('click');
+  assert.equal(nodes()[1].classList.contains('selected'), true);
+  assert.equal(details()[1], 'B');
+  assert.equal(ids.graph.attributes.viewBox, view);
+  assert.equal(ids.search.value, 'a');
+  assert.equal(ids.documentElement.dataset.theme, 'dark');
+  ids['details-toggle'].fire('click');
+  assert.equal(ids.details.hidden, false);
+  assert.equal(ids.viewer.classList.contains('details-collapsed'), false);
+  assert.equal(ids['details-toggle'].attributes['aria-expanded'], 'true');
+  assert.equal(ids['details-toggle'].attributes['aria-label'], 'Collapse entity details');
+  assert.equal(ids['details-toggle-arrow'].textContent, '›');
+});
+
 
 test('empty model initializes controls and accessible empty global tabs', () => {
   const {ids, nodes, details, all} = start({entities: []});
@@ -817,12 +865,13 @@ test('label borders and selected tab focus rings meet 3:1 contrast in both theme
   const ratio = (a, b) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
   const tokens = selector => {
     const start = css.indexOf(selector), block = css.slice(start, css.indexOf('}', start));
-    return ['panel', 'ink', 'accent', 'canvas', 'label-line'].map(name => block.match(new RegExp(`--${name}: (#[0-9a-f]{3}(?:[0-9a-f]{3})?)`, 'i'))?.[1]);
+    return ['panel', 'ink', 'accent', 'canvas', 'label-line', 'focus'].map(name => block.match(new RegExp(`--${name}: (#[0-9a-f]{3}(?:[0-9a-f]{3})?)`, 'i'))?.[1]);
   };
-  for (const [theme, [panel, ink, accent, canvas, border]] of [['light', tokens(':root {')], ['dark', tokens(':root[data-theme="dark"] {')]]) {
+  for (const [theme, [panel, ink, accent, canvas, border, focus]] of [['light', tokens(':root {')], ['dark', tokens(':root[data-theme="dark"] {')]]) {
     assert.ok(ratio(canvas, border) >= 3, `${theme} label border ratio is ${ratio(canvas, border)}`);
     assert.ok(ratio(panel, ink) >= 3, `${theme} selected tab outer ring ratio is ${ratio(panel, ink)}`);
     assert.ok(ratio(accent, panel) >= 3, `${theme} selected tab inset ring ratio is ${ratio(accent, panel)}`);
+    assert.ok(ratio(panel, focus) >= 3, `${theme} details toggle focus ring ratio is ${ratio(panel, focus)}`);
   }
   assert.match(css, /\.label-bg \{ fill: var\(--label\); stroke: var\(--label-line\); stroke-width: 1;/);
   assert.match(css, /\.global-tabs \{[^}]*padding: \.5rem;/);

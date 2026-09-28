@@ -12,11 +12,12 @@
 }
 :root[data-theme="dark"] { color-scheme: dark; --page: #101b29; --panel: #1c2b3b; --canvas: #142233; --ink: #e9f1f8; --muted: #bacbd9; --line: #577087; --label-line: #577087; --header: #0b1929; --card: #243e57; --card-line: #87b9e6; --external: #303a49; --derived: #25483e; --badge: #385672; --edge: #b3c8d8; --owned: #8cc9f6; --isa: #d4adfa; --accent: #ffc078; --label: #273a4d; --focus: #ffcc64; }
 body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: var(--ink); background: var(--page); }
-header, #globals { padding: 1rem 2rem; }
-header { background: var(--header); color: #fff; }
+body > header, #globals { padding: 1rem 2rem; }
+body > header { background: var(--header); color: #fff; }
 h1 { margin: 0; }
 main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(19rem, 1fr); gap: 1rem; padding: 1rem; }
-.graph-panel, aside, #globals section { background: var(--panel); border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; box-shadow: 0 3px 12px #0001; }
+#viewer.details-collapsed { grid-template-columns: minmax(0, 1fr) 3rem; }
+.graph-panel, #details-panel, #globals section { background: var(--panel); border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; box-shadow: 0 3px 12px #0001; }
 .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 input { min-width: 12rem; flex: 1; padding: .5rem; }
 button, select, input { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: .3rem; }
@@ -48,8 +49,22 @@ button:focus-visible, select:focus-visible, input:focus-visible, svg:focus-visib
 .edge-label-leader.highlight { stroke: var(--accent); stroke-width: 2; }
 .node-label { fill: var(--ink); font-size: 15px; font-weight: 600; }
 small, .muted { color: var(--muted); }
-aside { overflow-wrap: anywhere; max-height: 75vh; overflow-y: auto; }
-aside h3 { border-bottom: 1px solid var(--line); margin-bottom: .2rem; }
+#details-panel { display: flex; flex-direction: column; min-width: 0; max-height: 75vh; overflow: hidden; padding: 0; }
+.details-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: 1rem; border-bottom: 1px solid var(--line); }
+.details-header h2 { margin: 0; font-size: 1.15rem; }
+#details-toggle { display: inline-flex; align-items: center; gap: .25rem; min-height: 2.75rem; }
+#details-toggle:focus-visible { outline-offset: -5px; }
+#details-toggle-rail-label, #details-toggle-mobile-label { display: none; }
+#details { overflow-wrap: anywhere; overflow-y: auto; padding: 0 1rem 1rem; }
+#details h2 { margin-top: 1rem; }
+#details h3 { border-bottom: 1px solid var(--line); margin-bottom: .2rem; }
+#viewer.details-collapsed #details-panel { min-width: 0; }
+#viewer.details-collapsed .details-header { height: 100%; min-height: 3rem; justify-content: center; padding: 0; border: 0; }
+#viewer.details-collapsed .details-header h2 { display: none; }
+#viewer.details-collapsed #details-toggle { flex-direction: column; justify-content: center; width: 100%; height: 100%; min-height: 3rem; padding: .25rem; border: 0; border-radius: .7rem; }
+#viewer.details-collapsed #details-toggle-label { display: none; }
+#viewer.details-collapsed #details-toggle-rail-label { display: inline; writing-mode: vertical-rl; }
+#viewer.details-collapsed #details-toggle-arrow { font-size: 1.4rem; line-height: 1; }
 .item { margin: .6rem 0; white-space: pre-wrap; }
 aside ul { padding-left: 1.3rem; }
 aside li { margin: .5rem 0; }
@@ -75,20 +90,29 @@ aside dd { margin: 0; }
 .global-definitions dd, .enum-values dd { margin: 0; }
 .globals-panel ul, .globals-panel ol { padding-left: 1.3rem; }
 .globals-panel li { margin: .5rem 0; }
-@media (max-width: 850px) { main { grid-template-columns: 1fr; } aside { max-height: none; } }
+@media (max-width: 850px) {
+  main, #viewer.details-collapsed { grid-template-columns: 1fr; }
+  #details-panel { max-height: none; }
+  #viewer.details-collapsed .details-header { height: auto; min-height: 3rem; }
+  #viewer.details-collapsed #details-toggle { flex-direction: row; justify-content: center; width: 100%; min-height: 3rem; padding: .4rem .7rem; border: 1px solid var(--line); }
+  #viewer.details-collapsed #details-toggle-label { display: none; }
+  #viewer.details-collapsed #details-toggle-rail-label { display: none; }
+  #viewer.details-collapsed #details-toggle-mobile-label { display: inline; }
+  #viewer.details-collapsed #details-toggle-arrow { display: none; }
+}
 
 </style>
 </head>
 <body>
 <header><h1 id="title">Domain model</h1><p id="description"></p></header>
-<main>
+<main id="viewer">
 <section aria-label="Entity graph" class="graph-panel">
 <div class="toolbar"><label for="search">Find entities</label><input id="search" type="search" autocomplete="off" placeholder="Filter by name"><label for="layout">Layout</label><select id="layout"><option value="grid">Grid</option><option value="flow-down">Flow down</option><option value="flow-right">Flow right</option></select><button id="arrange" type="button">Arrange</button><button id="zoom-in" type="button" aria-label="Zoom in">+</button><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="fit" type="button">Fit view</button><label for="theme">Theme</label><select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
-<p id="help">Click a node or press Enter or Space to see details and highlight its neighbors. Hover or click a relationship, or focus its label with Tab, to highlight both endpoints; move away or Tab out to return to the selection. Press Escape in the graph to clear the selected or hovered relationship highlight. Search dims nonmatching entities even when selected or highlighted; clear the search to see all. Drag nodes to move them; focus a node and press Alt+arrow keys to move it by 40 units. Drag the canvas or use arrow keys to pan; + and − zoom, 0 fits the view. Choose a layout and press Arrange to replace manual positions. Moves, selection, search, and theme last only until reload.</p>
+<p id="help">Click a node or press Enter or Space to see details and highlight its neighbors. Use the Entity details panel's Collapse button to give the graph more room; its Details rail reopens it, and selecting nodes still updates collapsed details. Hover or click a relationship, or focus its label with Tab, to highlight both endpoints; move away or Tab out to return to the selection. Press Escape in the graph to clear the selected or hovered relationship highlight. Search dims nonmatching entities even when selected or highlighted; clear the search to see all. Drag nodes to move them; focus a node and press Alt+arrow keys to move it by 40 units. Drag the canvas or use arrow keys to pan; + and − zoom, 0 fits the view. Choose a layout and press Arrange to replace manual positions. Moves, selection, search, and theme last only until reload.</p>
 <svg id="graph" role="group" aria-label="Entity relationship graph" aria-describedby="help" tabindex="0"><g id="viewport"></g></svg>
 <p>Arrows point from source to target · solid: owned · dashed: referenced · purple: is-a · dotted outline: external. Self-relationships are listed on nodes and in entity details. When an edge is obscured or has no clear short label connection, labels below the graph read Source → Target · role · cardinality, without a stem.</p>
 </section>
-<aside id="details" aria-live="polite"><h2>Entity details</h2><p>Select an entity in the graph.</p></aside>
+<aside id="details-panel" aria-label="Entity details"><header class="details-header"><h2>Entity details</h2><button id="details-toggle" type="button" aria-expanded="true" aria-controls="details" aria-label="Collapse entity details"><span id="details-toggle-label">Collapse</span><span id="details-toggle-arrow" aria-hidden="true">›</span><span id="details-toggle-rail-label" aria-hidden="true">Details</span><span id="details-toggle-mobile-label">Expand entity details</span></button></header><div id="details" aria-live="polite"><p>Select an entity in the graph.</p></div></aside>
 </main>
 <section id="globals" aria-label="Model-wide definitions"></section>
 <script id="model-data" type="application/json">{"title":"Example Domain Model","description":"A small, illustrative model used in the docs and as a golden fixture for the tooling. It models `Projects`, the `Users` who own them, and the `Policies` they contain.\n","entities":[{"name":"Policy","external":false,"definition":"A rule set evaluated by the system, belonging to exactly one `Project`. A `Policy` has no meaning outside its owning `Project`.\n","subtypeOf":"","derived":false,"derivation":"","attributes":[{"name":"enabled","type":"boolean","required":null,"description":"","derived":false,"derivation":""}],"relationships":[{"entity":"Project","cardinality":"n:1","ownership":"referenced","note":"The owning `Project`"}],"actions":[{"name":"create"},{"name":"enable"},{"name":"disable"},{"name":"delete"}],"invariants":[{"id":"belongs-to-one-project","statement":"Belongs to exactly one `Project`"}]},{"name":"Project","external":false,"definition":"A container for a set of related `Policies`, owned by at least one `User`. `Projects` are the primary unit of organization in the system.\n","subtypeOf":"","derived":false,"derivation":"","attributes":[{"name":"status","type":"ProjectStatus","required":null,"description":"","derived":false,"derivation":""},{"name":"enabledPolicyCount","type":"integer","required":null,"description":"","derived":true,"derivation":"Number of `Policies` in this `Project` whose `enabled` is true."}],"relationships":[{"entity":"User","cardinality":"n:n","role":"`Owner` or `Member`","ownership":"referenced","note":"Must always have at least one `Owner`"},{"entity":"Policy","cardinality":"1:n","ownership":"owned"},{"entity":"Project","cardinality":"1:0..1","role":"`Predecessor`","ownership":"referenced","note":"The archived `Project` this one replaced, if any"}],"actions":[{"name":"create"},{"name":"archive","actor":"Owner","preserves":["at-least-one-owner","no-archive-with-enabled-policies"]},{"name":"transfer_ownership","actor":"Owner","preserves":["at-least-one-owner"]}],"invariants":[{"id":"at-least-one-owner","statement":"Must have at least one `Owner` at all times"},{"id":"no-archive-with-enabled-policies","statement":"Cannot be archived while it has enabled `Policies`"}]},{"name":"User","external":false,"definition":"A human principal who can own or belong to `Projects`. Identity is managed externally; a `User` here is the in-domain projection of that identity.\n","subtypeOf":"","derived":false,"derivation":"","attributes":null,"relationships":[{"entity":"Project","cardinality":"n:n","role":"`Owner` or `Member`","ownership":"referenced"}],"actions":[{"name":"invite"},{"name":"deactivate"}],"invariants":[{"id":"unique-email","statement":"Email address is unique across all `Users`"}]}],"enums":[{"name":"ProjectStatus","description":"Lifecycle state of a `Project`.","values":[{"name":"active","definition":"In normal use; `Policies` can be enabled."},{"name":"archived","definition":"Retired and read-only; no `Policies` can be enabled."}]}],"glossary":[{"name":"Member","definition":"A `User` granted access to a `Project` without ownership rights.\n"},{"name":"Owner","definition":"A `User` with full control of a `Project` — can transfer ownership, archive it, and manage its `Policies`.\n"},{"name":"Predecessor","definition":"An archived `Project` that a newer one replaced, kept so the history of the work isn't lost.\n"}],"imports":null,"invariants":[{"id":"archived-project-has-no-enabled-policies","statement":"When a `Project` is archived, none of its `Policies` remain enabled."}],"scenarios":[{"name":"Transfer project ownership","description":"Verifies the at-least-one-owner invariant holds throughout a hand-off: the new `Owner` is added before the previous one steps down.\n","actors":["Owner","TargetUser"],"steps":["`Owner` selects `TargetUser` as new `Owner`","`Project`.owner updated to `TargetUser`","Previous `Owner` role set to `Member`"],"invariants_touched":["at-least-one-owner"]},{"name":"Archive a project with enabled policies","description":"Stress-tests the no-archive-with-enabled-policies invariant: the system must disable all `Policies` before the `Project` status transitions to archived.\n","actors":["Owner"],"steps":["`Owner` attempts to archive a `Project` that still has enabled `Policies`","System disables each `Policy` before archiving","`Project`.status set to archived"],"invariants_touched":["no-archive-with-enabled-policies","archived-project-has-no-enabled-policies"]},{"name":"Invite a user to a project","description":"Happy-path onboarding: a new `User` is created if the email is unknown, then added as a `Member`. Verifies email uniqueness is enforced on `User` creation.\n","actors":["Owner","InvitedUser"],"steps":["`Owner` invites a `User` by email address to a `Project`","A new `User` record is created if the email is not already known","The `User` is added to the `Project` as a `Member`"],"invariants_touched":["unique-email"]}]}</script>
@@ -99,6 +123,18 @@ aside dd { margin: 0; }
   const svg = document.getElementById('graph');
   const layer = document.getElementById('viewport');
   const details = document.getElementById('details');
+  const viewer = document.getElementById('viewer');
+  const detailsToggle = document.getElementById('details-toggle');
+  const detailsArrow = document.getElementById('details-toggle-arrow');
+  const setDetailsExpanded = expanded => {
+    details.hidden = !expanded;
+    viewer.classList.toggle('details-collapsed', !expanded);
+    detailsToggle.setAttribute('aria-expanded', String(expanded));
+    detailsToggle.setAttribute('aria-label', expanded ? 'Collapse entity details' : 'Expand entity details');
+    detailsArrow.textContent = expanded ? '›' : '‹';
+  };
+  setDetailsExpanded(!details.hidden);
+  detailsToggle.addEventListener('click', () => setDetailsExpanded(details.hidden));
   const globals = document.getElementById('globals');
   const NS = 'http://www.w3.org/2000/svg';
   const entities = model.entities || [];

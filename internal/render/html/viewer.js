@@ -4,6 +4,18 @@
   const svg = document.getElementById('graph');
   const layer = document.getElementById('viewport');
   const details = document.getElementById('details');
+  const viewer = document.getElementById('viewer');
+  const detailsToggle = document.getElementById('details-toggle');
+  const detailsArrow = document.getElementById('details-toggle-arrow');
+  const setDetailsExpanded = expanded => {
+    details.hidden = !expanded;
+    viewer.classList.toggle('details-collapsed', !expanded);
+    detailsToggle.setAttribute('aria-expanded', String(expanded));
+    detailsToggle.setAttribute('aria-label', expanded ? 'Collapse entity details' : 'Expand entity details');
+    detailsArrow.textContent = expanded ? '›' : '‹';
+  };
+  setDetailsExpanded(!details.hidden);
+  detailsToggle.addEventListener('click', () => setDetailsExpanded(details.hidden));
   const globals = document.getElementById('globals');
   const NS = 'http://www.w3.org/2000/svg';
   const entities = model.entities || [];
