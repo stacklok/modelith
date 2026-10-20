@@ -19,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: stacklok/modelith@v0.5.0
+      - uses: stacklok/modelith@v0.6.0
         with:
           files: "model.modelith.yaml"
-          version: v0.5.0
+          version: v0.6.0
           completeness: warn
           check-rendered: true
 ```
@@ -49,7 +49,7 @@ with:
 
 The action downloads the prebuilt `modelith` release binary for the runner's OS
 and architecture, verifies it against the release's published checksums, and runs
-it. The example sets the `version` input explicitly to `v0.5.0`; set it to
+it. The example sets the `version` input explicitly to `v0.6.0`; set it to
 another published release when you need a different version. Pinning your
 `uses:` reference to a commit SHA keeps CI runs reproducible: a given action
 keeps CI runs reproducible: a given action commit installs the selected
@@ -63,7 +63,7 @@ completeness findings for that copy and lets `check-rendered` skip a missing
 `.md` or a model this version cannot render. Structural and semantic findings,
 including a provenance-header defect or a changed copy, still fail the action.
 
-The default `v0.5.0` release supports this behavior. See [Vendoring a model from
+The default `v0.6.0` release supports this behavior. See [Vendoring a model from
 another repository](./10-vendoring.md) for provenance and render semantics.
 
 ## Regenerating the Markdown
