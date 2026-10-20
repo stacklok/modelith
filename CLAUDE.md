@@ -106,7 +106,7 @@ Claude Code plugin with `--plugin-dir` live in
 ## Cutting a release
 
 Push a `vX.Y.Z` tag on `main` — `release.yml` builds, signs, generates SBOMs,
-publishes the GitHub Release, and pushes the Homebrew formula to
+publishes the GitHub Release, and pushes the Homebrew cask to
 `stacklok/homebrew-tap`. After it succeeds:
 
 - **Bump `action.yml`'s `version` input default to the new tag and commit.**
