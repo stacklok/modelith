@@ -487,9 +487,10 @@ The JSON Schema covers structure. [`modelith lint`](./07-cli.md) adds:
     - an action `actor` that is neither a defined entity nor a glossary term.
 - **Completeness** checks (advisory warnings): entities with no invariants;
   entities no scenario exercises; a glossary term nothing references; an enum no
-  attribute uses; an [import](#imports) nothing references. The two
-  nothing-references-it checks don't apply to a model marked
-  [`shared: true`](#the-model-on-the-other-end-shared-true).
+  attribute uses; an [import](#imports) nothing references. The unused
+  glossary term and unused enum checks don't apply to a model marked
+  [`shared: true`](#the-model-on-the-other-end-shared-true); the unused import
+  check still does.
 
   These are advisory on purpose. An entity that genuinely has no rule to state
   is fine — leave its invariants empty rather than inventing a filler rule that

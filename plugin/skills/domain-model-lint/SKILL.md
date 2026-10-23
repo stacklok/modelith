@@ -38,9 +38,7 @@ the flag.
 ## Interpret the three layers
 
 - **Structural (error).** The file violates the JSON Schema — wrong type,
-  missing required field, bad `cardinality` — or names a cross-model reference
-  (`scope.Name`) in `relationship.entity` or `subtypeOf`, which is not
-  supported anywhere but an attribute `type`. Must be fixed; the model won't
+  missing required field, bad `cardinality`. Must be fixed; the model won't
   parse cleanly otherwise.
 - **Semantic (error or warning).** Errors (always block, flag-independent): a
   relationship points at an entity that doesn't exist; a scenario's
@@ -56,7 +54,9 @@ the flag.
   a dot that isn't a well-formed `scope.Name` (a dot is always reserved for a
   cross-model reference — `decimal(10.2)` and `google.protobuf.Timestamp` are
   errors, not primitives); a `scope.Name` type whose scope no import binds, or
-  that names no enum in the model it resolves to. Warnings: a backticked term
+  that names no enum in the model it resolves to; a `scope.Entity` in
+  `relationship.entity` or `subtypeOf` whose scope no import binds, or that
+  names no entity in the model it resolves to. Warnings: a backticked term
   resolves to no entity, role, or actor; an action `actor` that's neither an entity nor a
   glossary term; a PascalCase attribute `type` that names no defined enum —
   usually a typo or a concept that was never named; a relationship `role`

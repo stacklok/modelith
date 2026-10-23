@@ -111,8 +111,8 @@ func runImports(modelPath string, m *model.Model, files Files, res *Result, vend
 			Category: CategoryCompleteness,
 			Path:     fmt.Sprintf("/imports/%d", imp.index),
 			Message: fmt.Sprintf(
-				"import %q (scope %q) is never referenced — drop it, or reference one of its enums as %s.Name in an attribute type",
-				imp.path, scope, scope,
+				"import %q (scope %q) is never referenced — drop it, or reference one of its enums as %s.Name in an attribute type or one of its entities as %s.Entity in a relationship or subtypeOf",
+				imp.path, scope, scope, scope,
 			),
 		})
 	}

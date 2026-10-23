@@ -341,7 +341,7 @@ func TestImports_Resolution(t *testing.T) {
 			attrType: "string",
 			want: []wantFinding{{
 				SeverityWarning, CategoryCompleteness, "/imports/0",
-				"is never referenced",
+				"is never referenced — drop it, or reference one of its enums as payments.Name in an attribute type or one of its entities as payments.Entity in a relationship or subtypeOf",
 			}},
 		},
 		{
