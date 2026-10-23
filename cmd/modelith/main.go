@@ -23,6 +23,7 @@ import (
 	"github.com/stacklok/modelith/internal/lint"
 	"github.com/stacklok/modelith/internal/model"
 	"github.com/stacklok/modelith/internal/provenance"
+	"github.com/stacklok/modelith/internal/render/html"
 	"github.com/stacklok/modelith/internal/render/markdown"
 	"github.com/stacklok/modelith/internal/schema"
 )
@@ -603,19 +604,24 @@ func lintCmd() *cobra.Command {
 func renderCmd() *cobra.Command {
 	var (
 		out    string
+		format string
 		stdout bool
 		check  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "render <file>",
-		Short: "Render a domain-model file to Markdown (with embedded Mermaid)",
+		Short: "Render a domain-model file to Markdown or interactive HTML",
 		Example: strings.TrimSpace(`
   modelith render model.modelith.yaml            # write model.modelith.md beside the source
+  modelith render --format html model.modelith.yaml # write model.modelith.html beside the source
   modelith render -o out.md model.modelith.yaml  # write to a specific path
   modelith render --stdout model.modelith.yaml   # write to stdout instead of a file
   modelith render --check model.modelith.yaml    # CI gate: fail if the committed .md is stale`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if format != "markdown" && format != "html" {
+				return fmt.Errorf("invalid render format %q: must be markdown or html", format)
+			}
 			in := args[0]
 			data, err := os.ReadFile(in)
 			if err != nil {
@@ -624,6 +630,9 @@ func renderCmd() *cobra.Command {
 			target := out
 			if target == "" {
 				target = defaultOut(in)
+				if format == "html" {
+					target = strings.TrimSuffix(target, ".md") + ".html"
+				}
 			}
 
 			// A target under a directory that does not exist is a misconfigured
@@ -635,13 +644,11 @@ func renderCmd() *cobra.Command {
 			}
 
 			// A vendored model's rendered form belongs to its home repository,
-			// so it arrives with no committed .md and no obligation to carry
+			// so it arrives with no committed output and no obligation to carry
 			// one. --check runs over globs, and demanding one here would make
 			// this repository regenerate somebody else's document every time
 			// their model moved (ADR-0015). Naming the file to render it still
-			// renders it; that is how a deep link into a vendored model's .md
-			// gets something to point at — and once such an .md is committed, it
-			// goes stale like any other, so from then on --check does check it.
+			// renders it. Once the output is committed, --check does check it.
 			//
 			// What stays skipped is everything the origin owns rather than this
 			// repository: a copy this build cannot render at all — a newer schema
@@ -706,7 +713,12 @@ func renderCmd() *cobra.Command {
 				// There is no output file to relativize import links against, so
 				// they stay relative to the source — the same links a default,
 				// beside-the-source render would produce.
-				rendered := markdown.Render(m, sourceDir, sourceDir)
+				var rendered string
+				if format == "html" {
+					rendered = html.Render(m)
+				} else {
+					rendered = markdown.Render(m, sourceDir, sourceDir)
+				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), rendered)
 				return err
 			}
@@ -715,15 +727,28 @@ func renderCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolving %s: %w", target, err)
 			}
-			rendered := markdown.Render(m, sourceDir, outDir)
+			var rendered string
+			if format == "html" {
+				rendered = html.Render(m)
+			} else {
+				rendered = markdown.Render(m, sourceDir, outDir)
+			}
 
 			if check {
+				command := "modelith render " + in
+				if format == "html" {
+					command = "modelith render --format html"
+					if cmd.Flags().Changed("out") {
+						command += " --out " + shellQuote(out)
+					}
+					command += " -- " + shellQuote(in)
+				}
 				existing, err := os.ReadFile(target)
 				if err != nil {
-					return fmt.Errorf("cannot read committed output %s: %w — regenerate it with `modelith render %s` and commit the result", target, err, in)
+					return fmt.Errorf("cannot read committed output %s: %w — regenerate it with `%s` and commit the result", target, err, command)
 				}
 				if string(existing) != rendered {
-					return fmt.Errorf("%s is out of date — regenerate it with `modelith render %s` and commit the result", target, in)
+					return fmt.Errorf("%s is out of date — regenerate it with `%s` and commit the result", target, command)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s is up to date\n", target)
 				return nil
@@ -736,7 +761,10 @@ func renderCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&out, "out", "o", "", "output path (default: input with .md extension)")
+	cmd.Flags().StringVarP(&out, "out", "o", "", "output path (default: input with .md or .html extension)")
+	cmd.Flags().StringVar(&format, "format", "markdown", "output format: markdown or html")
+	_ = cmd.RegisterFlagCompletionFunc("format",
+		cobra.FixedCompletions([]string{"markdown", "html"}, cobra.ShellCompDirectiveNoFileComp))
 	cmd.Flags().BoolVar(&stdout, "stdout", false, "write to stdout instead of a file")
 	cmd.Flags().BoolVar(&check, "check", false, "verify the committed output is up to date; non-zero exit on drift")
 	// --stdout has no output file, so it conflicts with both --out and --check.
@@ -744,6 +772,9 @@ func renderCmd() *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("stdout", "check")
 	return cmd
 }
+
+// shellQuote quotes one POSIX shell argument in a diagnostic command.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 
 // isDir reports whether p exists and is a directory. Anything else — missing,
 // a plain file, unreadable — is false, because every one of those means a
