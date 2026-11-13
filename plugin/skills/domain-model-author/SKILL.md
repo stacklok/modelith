@@ -133,15 +133,15 @@ Follow the format exactly (see the schema reference). Key conventions:
 - **`imports`** (top level) lists other model files this one references, each
   a path relative to this file: a bare string (`./payments.modelith.yaml`,
   whose filename gives the scope — `payments`) or `{scope, path}` to name the
-  scope explicitly. Reference an item from an imported model as `scope.Name`
-  in an attribute `type` — **only there**; `relationship.entity` and
-  `subtypeOf` cannot be qualified this way (not supported yet, and the linter
-  says so explicitly if you try). An import must resolve inside the
-  repository holding this model (the nearest ancestor directory with a `.git`
-  entry, or this model's own directory if there is none) and name a
+  scope explicitly. Reference an imported enum as `scope.Name` in an attribute
+  `type`, and an imported entity as `scope.Entity` in `relationship.entity` or
+  `subtypeOf`. Checks stop at the import boundary: reciprocity, ownership, and
+  inherited invariants are not checked across it. An import must resolve
+  inside the repository holding this model (the nearest ancestor directory
+  with a `.git` entry, or this model's own directory if there is none) and name a
   readable, supported-version domain model, or it's a lint error. An import
   nothing references is a completeness warning: drop it, or reference one of
-  its enums.
+  its enums or entities.
 - **`glossary`** (top level) defines non-entity vocabulary — roles like `Owner`,
   states, domain nouns — as `Term: "definition"`. Define any role or actor name
   here; an undefined role warns, and an unused glossary term warns.
